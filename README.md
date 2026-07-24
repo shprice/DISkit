@@ -1,3 +1,5 @@
+<img width="100" height="100" alt="image" src="https://github.com/user-attachments/assets/90d9fa0f-3e47-4db1-bca2-1aaa5213332f" />
+
 # DISkit
 
 A lightweight, zero-dependency toolkit and single executable for **IEEE 1278 DIS** (Distributed Interactive Simulation) network traffic logging, replay, and live geospatial visualization.
