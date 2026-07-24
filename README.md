@@ -1,93 +1,151 @@
-<img width="90" height="90" alt="diskit" src="https://github.com/user-attachments/assets/0e8d30d6-0346-452a-8a0c-7025406b813e" />
+# DISkit
 
-# DISkit 
+A lightweight, zero-dependency toolkit and single executable for **IEEE 1278 DIS** (Distributed Interactive Simulation) network traffic logging, replay, and live geospatial visualization.
 
-A simple-to-deploy toolkit with logger and replay functionality for **IEEE 1278 DIS** (Distributed
-Interactive Simulation) network traffic, with a live browser dashboard.
+- **Single Executable Application (SEA)**: Compiles into standalone binaries (`dislogger.exe` on Windows, `dislogger` on Linux) with zero runtime dependencies.
+- **Capture**: Unicast or multicast UDP DIS traffic on a configurable port with real-time PDU type filtering.
+- **Record & Bookmarks**: Save to compact `.dislog` ZIP containers. Add interactive bookmarks during recording or replay, persisted directly into log metadata.
+- **Replay**: Replay logs back onto the network at **0.5x–1000x** speed, with continuous looping, version translation (DIS v4, v5, v6, v7), and broadcast address auto-calculation.
+- **Live Visualization**: Real-time stats dashboard displaying PDU rates, entity tracking tables, emitter details (frequency, PRF, ERP), transmitters, signals, and fire/detonation logs.
+- **Map View**: MIL-STD-2525 symbol rendering on an offline canvas with bundled world coastlines (no internet required), or switchable online OpenStreetMap Leaflet view.
+- **Native OS Folder Picker**: Native Windows File Explorer and Linux folder selection dialogs for log directory browsing.
+- **PCAP Export**: Export captured log files directly to `.pcap` format for Wireshark analysis.
 
-- **Capture** unicast or multicast UDP DIS traffic on a configurable port.
-- **Record** to a compact binary log; optionally **filter PDU types** to shrink files.
-- **Replay** recorded logs back onto the network at **0.5x–1000x** speed, with
-  optional **continuous looping** and a replay-time type filter.
-- **Live visualisation** of PDU type counts, PDU/s rate, entity count, emitter
-  details (band/frequency/PRF/ERP) during both capture and replay.
-- **Map view** of entity positions — offline canvas with bundled low-resolution
-  world coastlines (no internet), or switchable to online OpenStreetMap tiles.
-  Scroll to zoom, drag to pan, double-click to reset.
-- **PCAP export** so logs open in Wireshark.
+<img width="948" height="459" alt="DISkit Dashboard" src="https://github.com/user-attachments/assets/59a9c20a-6dbf-4f8d-8baa-8694df72abee" />
 
-<img width="948" height="459" alt="image" src="https://github.com/user-attachments/assets/59a9c20a-6dbf-4f8d-8baa-8694df72abee" />
+---
 
-## Requirements
+## Quick Start & Installation
 
-Node.js 18+ (developed against v24). No native modules.
+### Option 1: Standalone Single Executable (Recommended)
 
-## Setup
+No Node.js installation required. Download or build the standalone executable binary:
+
+#### Windows
+```powershell
+# Run standalone executable (automatically opens browser to http://127.0.0.1:8080)
+.\dislogger.exe
+
+# Optional: Install to system with Desktop shortcut
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
+```
+
+#### Linux
+```bash
+# Run standalone executable
+./dislogger
+
+# Optional: Install to system with Systemd background service
+sudo bash scripts/install-linux.sh
+```
+
+---
+
+### Option 2: Running from Source
+
+Requires **Node.js 18+** (Node 20+ LTS recommended).
 
 ```bash
+# 1. Install dependencies
 npm install
+
+# 2. Start DISkit (launches Web UI automatically)
 npm start
 ```
 
-Then open the UI it prints, e.g. <http://127.0.0.1:8080>.
+---
 
-## Try it without a live DIS source
+## Building Executables
 
-In a second terminal, start the built-in traffic generator:
+To package DISkit into a standalone Single Executable Application (SEA):
 
 ```bash
-npm run sim                       # 6 entities @ 10 Hz, unicast to 127.0.0.1:3000
-node src/simulator.js --count 12 --hz 20 --group 239.1.2.3 --port 3000   # multicast
+npm run build:sea
+```
+*Outputs distribution binaries and static assets to `dist/dislogger-dist/`.*
+
+---
+
+## Trying DISkit without a Live DIS Source
+
+DISkit includes a built-in multi-entity DIS traffic simulator for quick testing:
+
+In a second terminal, launch the simulator:
+
+```bash
+# 6 entities @ 10 Hz, unicast to 127.0.0.1:3000
+npm run sim
+
+# Advanced multicast simulation (12 entities @ 20 Hz)
+node src/simulator.js --count 12 --hz 20 --group 239.1.2.3 --port 3000
 ```
 
-In the UI (capture defaults to unicast): **Start Listening** → **● Record** →
-stop → switch to the **Replay** tab → pick the log → choose a speed → **▶ Play**.
-If you run the simulator with a multicast `--group`, tick **Multicast** in the
-Capture tab to match.
+In the Web UI:
+1. On the **Capture** tab: Click **Start Listening** → **● Record**.
+2. Stop recording, switch to the **Replay** tab, select the log file, and click **▶ Play**.
+
+---
 
 ## Configuration
 
-Edit `config.json`:
+Settings can be changed via the Web UI or by editing `config.json` in the application folder:
 
-| Key | Meaning |
-| --- | --- |
-| `web.host` / `web.port` | Address the dashboard is served on |
-| `capture.port` | UDP port to listen on |
-| `capture.multicastGroup` | Multicast group to join (ignore for unicast) |
-| `capture.bindAddress` | Interface to bind / join the group on |
-| `replay.destAddress` / `replay.destPort` | Where replayed PDUs are sent |
-| `replay.multicast` / `replay.ttl` | Multicast send options |
-| `logDir` | Where `.dislog` files are written |
+| Key | Description | Default |
+| :--- | :--- | :--- |
+| `web.host` / `web.port` | Web dashboard server address & port | `127.0.0.1` / `8080` |
+| `capture.port` | UDP port for incoming DIS traffic | `3000` |
+| `capture.multicastGroup` | Multicast group to join (ignored for unicast) | `239.1.2.3` |
+| `capture.bindAddress` | Local network interface to bind | `0.0.0.0` |
+| `replay.destAddress` | Target IP address for PDU replay (auto-calculated broadcast IP if omitted) | Calculated Subnet Broadcast (e.g. `192.168.1.255`) |
+| `replay.destPort` | Target UDP port for PDU replay | `3000` |
+| `replay.multicast` / `ttl` | Multicast replay options | `false` / `16` |
+| `logDir` | Directory for `.dislog` files (supports relative paths like `logs` or absolute paths) | `logs` |
+| `openBrowser` | Automatically open default browser on launch | `true` |
 
-These are also editable live in the UI.
+---
 
-## Log format
+## Log Format & PCAP Export
 
-`*.dislog` — 32-byte file header (magic, version, start wall-clock) followed by
-records of `[uint64 offset µs][uint16 port][uint16 length][PDU bytes]`. A
-sidecar `*.dislog.meta.json` stores capture config, duration and PDU-type counts
-for fast summaries. Use **Export to PCAP** for Wireshark-compatible output.
+- **`*.dislog`**: Efficient ZIP container format storing binary PDU stream records `[uint64 offset µs][uint16 port][uint16 length][PDU bytes]` alongside `meta.json` containing capture metadata, duration, PDU type counts, and user bookmarks.
+- **PCAP Export**: Click **Export PCAP** in the UI (or send command) to produce standard `.pcap` files compatible with Wireshark.
 
-## PDU decoding
+---
 
-Every PDU's common 12-byte header is parsed for counting and filtering. Bodies
-are fully decoded for Entity State (position/orientation/marking/force),
-Fire, Detonation, Electromagnetic Emission (emitter/beam details), Designator
-and Transmitter. Other PDUs are logged and counted by header. Entity positions
-are converted from WGS84 geocentric (ECEF) metres to lat/lon/alt for the map.
+## PDU Decoding & Standards Support
 
-## Project layout
+DISkit decodes DIS protocol families (IEEE 1278.1 / 1278.1a):
+- **Entity State PDU**: Geodetic WGS84 ECEF coordinate transformation, Euler orientation, entity marking, force ID, and MIL-STD-2525 force symbology mapping.
+- **Fire & Detonation PDUs**: Weapon release, target tracking, range, and impact result logging.
+- **Electromagnetic Emission PDU**: Emitter system status, frequency, PRF, pulse width, and ERP parameters.
+- **Transmitter & Signal PDUs**: Radio state and audio/data communications.
+- **Protocol Version Translation**: Replay DIS logs as DIS v4 (1993), v5 (1995), v6 (1998), or v7 (2012).
+
+---
+
+## Project Layout
 
 ```
-src/
-  server.js      HTTP + WebSocket orchestrator
-  capture.js     UDP listen, filter, record
-  logformat.js   binary log read/write + meta sidecar
-  player.js      variable-speed looping replay
-  pcap.js        PCAP export
-  stats.js       rolling PDU/entity/emitter aggregation
-  simulator.js   built-in DIS traffic generator
-  dis/           enums, header parse, body decoders, ECEF<->geodetic
-public/          browser dashboard (UI, map, charts)
-  coastline.json bundled low-res world coastline (Natural Earth 110m, public domain)
+dislogger/
+├── src/
+│   ├── server.js        HTTP, WebSocket orchestrator, OS folder picker & splash banner
+│   ├── capture.js       UDP DIS socket listener, filtering, and ZIP recorder
+│   ├── logformat.js     ZIP container & legacy binary log format reader/writer
+│   ├── player.js        Variable-speed, looping, and timestamp-seeking replay engine
+│   ├── pcap.js          PCAP export utility
+│   ├── stats.js         Rolling PDU, entity, emitter, and event aggregator
+│   ├── simulator.js     Built-in multi-entity DIS traffic generator
+│   └── dis/             PDU decoders, enums, version mappers, ECEF <-> Lat/Lon/Alt math
+├── public/              Web UI dashboard (HTML, CSS, JS, Leaflet map, Milsymbol icons)
+├── scripts/
+│   ├── build-sea.mjs    Node.js SEA single-executable build pipeline script
+│   ├── install-windows.ps1 Windows PowerShell installer script
+│   └── install-linux.sh Linux Systemd service installer script
+└── dist/
+    └── dislogger-dist/  Compiled standalone executable distribution package
 ```
+
+---
+
+## License
+
+MIT
