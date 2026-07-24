@@ -165,13 +165,15 @@ const MapView = (() => {
       seen.add(e.key);
       const col = forceColors[e.forceId] || '#c9a227';
       let m = markers.get(e.key);
+      const label = e.marking || e.key;
       if (!m) {
         m = window.L.circleMarker([e.lat, e.lon], { radius: 6, color: col, fillColor: col, fillOpacity: 0.8, weight: 1 });
         m.addTo(leaflet); markers.set(e.key, m);
+        m.bindTooltip(label, { permanent: false, sticky: true });
       } else {
         m.setLatLng([e.lat, e.lon]); m.setStyle({ color: col, fillColor: col });
+        if (m.getTooltip()?.getContent() !== label) m.setTooltipContent(label);
       }
-      m.bindTooltip(e.marking || e.key, { permanent: false });
     }
     for (const [k, m] of markers) {
       if (!seen.has(k)) { leaflet.removeLayer(m); markers.delete(k); }

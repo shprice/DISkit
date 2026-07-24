@@ -146,21 +146,26 @@
         <div class="metric"><span id="mEmitters">0</span><label>Emitters</label></div>
         <div class="metric"><span id="mBytes">0</span><label>KB</label></div>
       </div>
-      <h3>PDU Types</h3>
-      <div class="pdurow">
-        <canvas id="pieChart" width="130" height="130"></canvas>
+      <div class="pielegrow">
         <div class="sapanel">
-          <canvas id="sitePie" width="80" height="80"></canvas>
+          <canvas id="pieChart" width="90" height="90"></canvas>
+          <div class="hint">PDU Types</div>
+        </div>
+        <div class="pielegend" id="typeChart"></div>
+      </div>
+      <div class="pielegrow">
+        <div class="sapanel">
+          <canvas id="sitePie" width="90" height="90"></canvas>
           <div class="hint">Site ID</div>
         </div>
+        <div class="pielegend" id="siteLegend"></div>
+      </div>
+      <div class="pielegrow">
         <div class="sapanel">
-          <canvas id="appPie" width="80" height="80"></canvas>
+          <canvas id="appPie" width="90" height="90"></canvas>
           <div class="hint">App ID</div>
         </div>
-        <div class="chart-col">
-          <div id="typeChart" class="chart"></div>
-          <div id="siteAppLegend" class="salegend"></div>
-        </div>
+        <div class="pielegend" id="appLegend"></div>
       </div>
     </section>
 

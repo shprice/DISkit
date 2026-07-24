@@ -130,10 +130,6 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .ms-sep { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
 .ms-all { font-weight: 600; }
 
-/* Site/App distribution charts */
-.sapanel { text-align: center; flex: 0 0 auto; }
-.salegend { font-size: 10px; display: flex; flex-direction: column; gap: 2px; }
-
 .metrics { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .metric {
   flex: 1; min-width: 60px; background: var(--panel2); border: 1px solid var(--line);
@@ -142,10 +138,17 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .metric span { display: block; font-size: 20px; font-weight: 600; }
 .metric label { justify-content: center; text-align: center; color: var(--muted); }
 
-.pdurow { display: flex; gap: 10px; align-items: flex-start; }
-#pieChart { flex: 0 0 auto; width: 130px; height: 130px; }
+/* Three-row pie + legend layout */
+.pielegrow { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.pielegrow:last-child { margin-bottom: 0; }
+.sapanel { flex: 0 0 auto; text-align: center; }
+.pielegend {
+  flex: 1; min-width: 0;
+  max-height: 90px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
 .chart { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.chart-col { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .bar { display: flex; align-items: center; gap: 6px; font-size: 11px; }
 .bar .name { flex: 1; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .bar .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; flex-shrink: 0; vertical-align: middle; }

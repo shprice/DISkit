@@ -233,22 +233,18 @@ function renderStats(s) {
   $('mEmitters').textContent = s.emitterCount;
   $('mBytes').textContent = Math.round(s.totalBytes / 1024);
 
-  $('typeChart').innerHTML = s.types.map((t, i) => {
-    const col = PIE_COLORS[i % PIE_COLORS.length];
-    return `<div class="bar">
-      <span class="name" title="${t.name}"><span class="swatch" style="background:${col}"></span>${t.type} ${t.name}</span>
-      <span class="val">${fmt(t.count)}</span>
-    </div>`;
-  }).join('');
-  drawPie(s.types);
-  drawSmallPie('sitePie', s.sites);
-  drawSmallPie('appPie',  s.apps);
-  const leg = $('siteAppLegend');
-  const rows = [
-    ...(s.sites || []).slice(0, 4).map((x, i) => `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>Site ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`),
-    ...(s.apps  || []).slice(0, 4).map((x, i) => `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>App ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`),
-  ];
-  if (leg) leg.innerHTML = rows.join('');
+  $('typeChart').innerHTML = s.types.map((t, i) =>
+    `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>${t.name}</span><span class="val">${fmt(t.count)}</span></div>`
+  ).join('');
+  drawPie('pieChart', s.types, 'PDUs');
+  drawPie('sitePie',  s.sites, 'Sites');
+  drawPie('appPie',   s.apps,  'Apps');
+  $('siteLegend').innerHTML = (s.sites || []).map((x, i) =>
+    `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>Site ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`
+  ).join('') || '<span class="hint" style="padding:2px 0">no data</span>';
+  $('appLegend').innerHTML = (s.apps || []).map((x, i) =>
+    `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>App ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`
+  ).join('') || '<span class="hint" style="padding:2px 0">no data</span>';
 
   const eb = $('entityTable').querySelector('tbody');
   eb.innerHTML = s.entities.map((e) => `
@@ -269,34 +265,7 @@ function renderStats(s) {
 function fnum(v, d) { return (v === undefined || v === null || !isFinite(v)) ? '' : Number(v).toFixed(d); }
 
 // Donut/pie chart of PDU type distribution (same colour order as the bars).
-function drawPie(types) {
-  const c = $('pieChart');
-  const ctx = c.getContext('2d');
-  const w = c.width, h = c.height, cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 3;
-  ctx.clearRect(0, 0, w, h);
-  const total = (types || []).reduce((s, t) => s + t.count, 0);
-  if (!total) {
-    ctx.fillStyle = '#5c6b7a'; ctx.font = '11px system-ui';
-    ctx.textAlign = 'center'; ctx.fillText('no data', cx, cy); ctx.textAlign = 'start';
-    return;
-  }
-  let a = -Math.PI / 2;
-  types.forEach((t, i) => {
-    const a2 = a + (t.count / total) * 2 * Math.PI;
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a, a2); ctx.closePath();
-    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length]; ctx.fill();
-    a = a2;
-  });
-  ctx.beginPath(); ctx.arc(cx, cy, r * 0.56, 0, 2 * Math.PI);
-  ctx.fillStyle = '#161b22'; ctx.fill();
-  ctx.fillStyle = '#d7dde5'; ctx.font = 'bold 16px system-ui';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(fmt(total), cx, cy - 5);
-  ctx.fillStyle = '#8b97a7'; ctx.font = '9px system-ui'; ctx.fillText('PDUs', cx, cy + 9);
-  ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
-}
-
-function drawSmallPie(canvasId, data) {
+function drawPie(canvasId, data, centerLabel) {
   const c = $(canvasId);
   if (!c) return;
   const ctx = c.getContext('2d');
@@ -314,8 +283,14 @@ function drawSmallPie(canvasId, data) {
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a, a2); ctx.closePath();
     ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length]; ctx.fill(); a = a2;
   });
-  ctx.beginPath(); ctx.arc(cx, cy, r * 0.52, 0, 2 * Math.PI);
+  const ir = r * 0.54;
+  ctx.beginPath(); ctx.arc(cx, cy, ir, 0, 2 * Math.PI);
   ctx.fillStyle = '#161b22'; ctx.fill();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#d7dde5'; ctx.font = `bold ${ir > 20 ? 12 : 10}px system-ui`;
+  ctx.fillText(fmt(total), cx, centerLabel ? cy - 4 : cy);
+  if (centerLabel) { ctx.fillStyle = '#8b97a7'; ctx.font = '9px system-ui'; ctx.fillText(centerLabel, cx, cy + 8); }
+  ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
 }
 
 let feedLines = [];
