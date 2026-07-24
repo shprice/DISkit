@@ -5,3 +5,10 @@ logs/
 *.dislog.meta.json
 .claude/
 .remember/
+
+# Un-ignore bundled sample log files
+!sample_logs/
+!**/sample_logs/**
+!sample_logs/*
+!**/Example Log.dislog
+!**/Example Log.dislog.meta.json

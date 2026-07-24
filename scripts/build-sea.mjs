@@ -97,7 +97,16 @@ const copyDir = (src, dest) => {
   }
 };
 copyDir(path.join(ROOT, 'public'), path.join(STAGING, 'public'));
-fs.mkdirSync(path.join(STAGING, 'logs'), { recursive: true });
+const logsStaging = path.join(STAGING, 'logs');
+fs.mkdirSync(logsStaging, { recursive: true });
+const sampleLogsDir = path.join(ROOT, 'sample_logs');
+if (fs.existsSync(sampleLogsDir)) {
+  for (const f of fs.readdirSync(sampleLogsDir)) {
+    if (f.endsWith('.dislog') || f.endsWith('.json')) {
+      fs.copyFileSync(path.join(sampleLogsDir, f), path.join(logsStaging, f));
+    }
+  }
+}
 
 console.log('\n==================================================');
 console.log(`SUCCESS! Single Executable Application built successfully:`);
