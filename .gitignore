@@ -1,14 +1,13 @@
 node_modules/
-logs/
+/logs/
 *.pcap
-*.dislog
-*.dislog.meta.json
 .claude/
 .remember/
 
-# Un-ignore bundled sample log files
+# Un-ignore sample logs directory and distributed dist logs
 !sample_logs/
-!**/sample_logs/**
-!sample_logs/*
+!sample_logs/**
+!dist/dislogger-dist/logs/
+!dist/dislogger-dist/logs/**
 !**/Example Log.dislog
 !**/Example Log.dislog.meta.json
