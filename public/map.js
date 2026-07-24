@@ -25,21 +25,16 @@ const MapView = (() => {
   // Milsymbol canvas symbol cache: sidc -> { img, ready, size, anchor } | null
   const symbolCache = new Map();
 
-  // DIS kind.domain → [battleDimension, functionId(6 chars)]
-  // Full 2525C SIDC = S + aff(1) + bd(1) + P + fn(6) + ----* = 15 chars
-  const SIDC_MAP = {
-    '1.1': ['G', 'UCFV--'],  // Platform/Land → armored vehicle
-    '1.2': ['A', 'MFFW--'],  // Platform/Air → fixed wing
-    '1.3': ['S', 'XM----'],  // Platform/Surface → ship
-    '1.4': ['U', 'SS----'],  // Platform/Subsurface → submarine
-    '1.5': ['P', 'V-----'],  // Platform/Space
-    '2.1': ['G', 'WMS---'],  // Munition/Land
-    '2.2': ['A', 'WMA---'],  // Munition/Air
-    '3.1': ['G', 'UCI---'],  // LifeForm/Land → infantry
-    '3.2': ['A', 'MFH---'],  // LifeForm/Air → helicopter
-    '3.3': ['S', 'UCI---'],  // LifeForm/Surface
+  // DIS kind.domain → 2525C battle dimension character
+  const BD_MAP = {
+    '1.1': 'G', '1.2': 'A', '1.3': 'S', '1.4': 'U', '1.5': 'P',
+    '2.1': 'G', '2.2': 'A',
+    '3.1': 'G', '3.2': 'A', '3.3': 'S', '3.4': 'U',
+    '9.1': 'G', '9.2': 'A', '9.3': 'S',
   };
 
+  // Build a minimal 2525C SIDC using only affiliation + battle dimension —
+  // no function-ID characters inside the frame, so no confusing pictographics.
   function entityToSidc(entity) {
     if (!window.ms) return null;
     const AFF = ['U', 'F', 'H', 'N'];
@@ -47,8 +42,8 @@ const MapView = (() => {
     const parts = (entity.type || '0.0.0.0.0.0.0').split(/[.\-]/);
     const kind = +parts[0] || 0;
     const domain = +parts[1] || 0;
-    const [bd, fn] = SIDC_MAP[`${kind}.${domain}`] || ['Z', '------'];
-    return `S${aff}${bd}P${fn}----*`;
+    const bd = BD_MAP[`${kind}.${domain}`] || 'G';
+    return `S${aff}${bd}P----------*`;
   }
 
   function getOrCreateSymbol(sidc) {
