@@ -1,6 +1,6 @@
-# DISLogger
+# DISkit
 
-A simple-to-deploy logger and replay utility for **IEEE 1278 DIS** (Distributed
+A simple-to-deploy toolkit with logger and replay functionality for **IEEE 1278 DIS** (Distributed
 Interactive Simulation) network traffic, with a live browser dashboard.
 
 - **Capture** unicast or multicast UDP DIS traffic on a configurable port.
@@ -13,6 +13,8 @@ Interactive Simulation) network traffic, with a live browser dashboard.
   world coastlines (no internet), or switchable to online OpenStreetMap tiles.
   Scroll to zoom, drag to pan, double-click to reset.
 - **PCAP export** so logs open in Wireshark.
+
+<img width="948" height="459" alt="image" src="https://github.com/user-attachments/assets/59a9c20a-6dbf-4f8d-8baa-8694df72abee" />
 
 ## Requirements
 
