@@ -1,4 +1,6 @@
-# DISkit
+<img width="90" height="90" alt="diskit" src="https://github.com/user-attachments/assets/0e8d30d6-0346-452a-8a0c-7025406b813e" />
+
+# DISkit 
 
 A simple-to-deploy toolkit with logger and replay functionality for **IEEE 1278 DIS** (Distributed
 Interactive Simulation) network traffic, with a live browser dashboard.
