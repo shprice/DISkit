@@ -1,11 +1,8 @@
 // IEEE 1278.1 DIS enumerations (subset of the most commonly used values).
 // References: IEEE 1278.1-2012 and SISO-REF-010.
 
-// Protocol Version (header byte 0)
+// Protocol Version (header byte 0) — supported versions only
 export const ProtocolVersion = {
-  1: 'DIS 1.0 (Draft)',
-  2: 'DIS 2.0 3rd Draft',
-  3: 'DIS 2.0 4th Draft',
   4: 'IEEE 1278-1993',
   5: 'IEEE 1278.1-1995',
   6: 'IEEE 1278.1a-1998',
