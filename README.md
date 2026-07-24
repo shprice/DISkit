@@ -1,6 +1,6 @@
-# DISLogger
+# DISkit
 
-A simple-to-deploy logger and replay utility for **IEEE 1278 DIS** (Distributed
+A simple-to-deploy toolkit with logger and replay functionality for **IEEE 1278 DIS** (Distributed
 Interactive Simulation) network traffic, with a live browser dashboard.
 
 - **Capture** unicast or multicast UDP DIS traffic on a configurable port.
