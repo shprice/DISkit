@@ -88,7 +88,7 @@ function startRecording(opts) {
   if (!name.endsWith('.dislog')) name += '.dislog';
   fs.mkdirSync(recordDir, { recursive: true });
   const filePath = path.join(recordDir, name);
-  capture.startRecording(filePath, opts.filterTypes || [], opts.versionFilter || []);
+  capture.startRecording(filePath, opts.filterTypes || [], opts.versionFilter || [], opts.siteFilter || [], opts.appFilter || []);
   broadcast({ kind: 'status', mode, recording: true, message: `Recording to ${filePath}` });
 }
 
@@ -121,6 +121,8 @@ function startReplay(opts) {
     typeFilter: opts.filterTypes || [],
     versionFilter: opts.versionFilter || [],
     replayAsVersion: opts.replayAsVersion || null,
+    siteFilter: opts.siteFilter || [],
+    appFilter:  opts.appFilter  || [],
   });
   mode = 'replaying';
   broadcast({ kind: 'status', mode, message: `Replaying ${opts.file} @ ${opts.speed || 1}x`, meta });

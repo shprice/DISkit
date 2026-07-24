@@ -43,42 +43,50 @@ function setConn(on) {
 }
 function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 
-// ---- filter checkbox grids -------------------------------------------------
-function buildFilterGrid(el) {
+// ---- multi-select dropdowns ------------------------------------------------
+function buildMultiselect(el, items, summary, labelFn) {
+  el.className = 'multiselect';
   el.innerHTML = '';
-  for (const [t, name] of Object.entries(PDU_TYPES)) {
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'ms-btn';
+  const panel = document.createElement('div');
+  panel.className = 'ms-panel';
+  const allLbl = document.createElement('label');
+  allLbl.className = 'ms-all';
+  allLbl.innerHTML = '<input type="checkbox" class="ms-master" checked> All';
+  panel.appendChild(allLbl);
+  const sep = document.createElement('hr'); sep.className = 'ms-sep';
+  panel.appendChild(sep);
+  for (const [val, name] of Object.entries(items)) {
     const lbl = document.createElement('label');
-    lbl.innerHTML = `<input type="checkbox" value="${t}" checked> ${t} - ${name}`;
-    el.appendChild(lbl);
+    const text = labelFn ? labelFn(val, name) : `${val} — ${name}`;
+    lbl.innerHTML = `<input type="checkbox" value="${val}" checked> ${text}`;
+    panel.appendChild(lbl);
   }
+  el.appendChild(btn); el.appendChild(panel);
+  const master = panel.querySelector('.ms-master');
+  function syncSummary() {
+    const boxes = [...panel.querySelectorAll('input[value]')];
+    const n = boxes.filter(b => b.checked).length;
+    master.checked = n === boxes.length; master.indeterminate = n > 0 && n < boxes.length;
+    btn.textContent = (n === boxes.length ? summary : `${n}/${boxes.length}`) + ' ▾';
+  }
+  master.addEventListener('change', () => { panel.querySelectorAll('input[value]').forEach(c => c.checked = master.checked); syncSummary(); });
+  panel.addEventListener('change', (e) => { if (e.target !== master) syncSummary(); });
+  btn.addEventListener('click', (e) => { e.stopPropagation(); document.querySelectorAll('.multiselect.open').forEach(o => { if (o !== el) o.classList.remove('open'); }); el.classList.toggle('open'); });
+  syncSummary();
 }
 
 // Ticked types are the ones to log/send. If every box is ticked we send [] so
 // the server treats it as "no restriction" (also covers PDU types not listed).
 function filterPayload(el) {
-  const boxes = [...el.querySelectorAll('input')];
+  const boxes = [...el.querySelectorAll('input[value]')];
   const checked = boxes.filter((b) => b.checked).map((b) => Number(b.value));
   return checked.length === boxes.length ? [] : checked;
 }
 
-function buildVersionFilterGrid(el) {
-  el.innerHTML = '';
-  for (const [v, name] of Object.entries(DIS_VERSIONS)) {
-    const lbl = document.createElement('label');
-    lbl.innerHTML = `<input type="checkbox" value="${v}" checked> v${v} — ${name}`;
-    el.appendChild(lbl);
-  }
-}
-
-function wireSelectAll(masterId, gridId) {
-  const master = $(masterId), grid = $(gridId);
-  master.onchange = () => grid.querySelectorAll('input').forEach((c) => { c.checked = master.checked; });
-  grid.addEventListener('change', () => {
-    const boxes = [...grid.querySelectorAll('input')];
-    const checked = boxes.filter((b) => b.checked).length;
-    master.checked = checked === boxes.length;
-    master.indeterminate = checked > 0 && checked < boxes.length;
-  });
+function parseIdList(str) {
+  return (str || '').split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
 }
 
 // ---- incoming messages -----------------------------------------------------
@@ -133,6 +141,10 @@ function setMode(mode) {
   const b = $('modeBadge');
   b.textContent = mode; b.className = 'badge ' + mode;
   if (mode !== 'replaying') { playerState = 'idle'; $('btnPause').textContent = '⏸ Pause'; }
+  const listening = mode === 'capturing';
+  $('btnListen').textContent = listening ? '◉ Listening…' : 'Start Listening';
+  $('btnListen').className   = listening ? 'active' : 'primary';
+  $('btnPlay').className     = mode === 'replaying' ? 'active' : 'primary';
 }
 
 function setRecording(on, startMs, bytes) {
@@ -232,6 +244,14 @@ function renderStats(s) {
     </div>`;
   }).join('');
   drawPie(s.types);
+  drawSmallPie('sitePie', s.sites);
+  drawSmallPie('appPie',  s.apps);
+  const leg = $('siteAppLegend');
+  const rows = [
+    ...(s.sites || []).slice(0, 4).map((x, i) => `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>Site ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`),
+    ...(s.apps  || []).slice(0, 4).map((x, i) => `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>App ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`),
+  ];
+  if (leg) leg.innerHTML = rows.join('');
 
   const eb = $('entityTable').querySelector('tbody');
   eb.innerHTML = s.entities.map((e) => `
@@ -277,6 +297,28 @@ function drawPie(types) {
   ctx.fillText(fmt(total), cx, cy - 5);
   ctx.fillStyle = '#8b97a7'; ctx.font = '9px system-ui'; ctx.fillText('PDUs', cx, cy + 9);
   ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+}
+
+function drawSmallPie(canvasId, data) {
+  const c = $(canvasId);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height, cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 2;
+  ctx.clearRect(0, 0, w, h);
+  const total = (data || []).reduce((s, d) => s + d.count, 0);
+  if (!total) {
+    ctx.fillStyle = '#5c6b7a'; ctx.font = '9px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('no data', cx, cy);
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic'; return;
+  }
+  let a = -Math.PI / 2;
+  data.forEach((d, i) => {
+    const a2 = a + (d.count / total) * 2 * Math.PI;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a, a2); ctx.closePath();
+    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length]; ctx.fill(); a = a2;
+  });
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.52, 0, 2 * Math.PI);
+  ctx.fillStyle = '#161b22'; ctx.fill();
 }
 
 let feedLines = [];
@@ -342,23 +384,22 @@ function doPlay() {
     destAddress: $('repMulti').checked ? $('repGroup').value : $('repDest').value,
     destPort: +$('repPort').value, multicast: $('repMulti').checked,
     speed: +$('repSpeed').value, loop: $('repLoop').checked,
-    filterTypes: filterPayload($('repFilter')),
-    versionFilter: filterPayload($('repVersionFilter')),
+    filterTypes:    filterPayload($('repFilter')),
+    versionFilter:  filterPayload($('repVersionFilter')),
     replayAsVersion: asVer ? +asVer : null,
+    siteFilter: parseIdList($('repSiteIds').value),
+    appFilter:  parseIdList($('repAppIds').value),
   });
 }
 
 // ---- wiring ----------------------------------------------------------------
 function init() {
   window.MapView.init();
-  buildFilterGrid($('recFilter'));
-  buildFilterGrid($('repFilter'));
-  buildVersionFilterGrid($('recVersionFilter'));
-  buildVersionFilterGrid($('repVersionFilter'));
-  wireSelectAll('recAll', 'recFilter');
-  wireSelectAll('repAll', 'repFilter');
-  wireSelectAll('recVerAll', 'recVersionFilter');
-  wireSelectAll('repVerAll', 'repVersionFilter');
+  buildMultiselect($('recFilter'),        PDU_TYPES,    'All PDU types');
+  buildMultiselect($('repFilter'),        PDU_TYPES,    'All PDU types');
+  buildMultiselect($('recVersionFilter'), DIS_VERSIONS, 'All versions', (v, n) => `v${v} — ${n}`);
+  buildMultiselect($('repVersionFilter'), DIS_VERSIONS, 'All versions', (v, n) => `v${v} — ${n}`);
+  document.addEventListener('click', () => document.querySelectorAll('.multiselect.open').forEach(el => el.classList.remove('open')));
 
   document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
     document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
@@ -376,8 +417,10 @@ function init() {
     cmd: 'startRecording', port: +$('capPort').value, multicast: $('capMulti').checked,
     multicastGroup: $('capGroup').value, bindAddress: $('capBind').value,
     filename: $('recName').value || undefined,
-    filterTypes: filterPayload($('recFilter')),
+    filterTypes:   filterPayload($('recFilter')),
     versionFilter: filterPayload($('recVersionFilter')),
+    siteFilter: parseIdList($('recSiteIds').value),
+    appFilter:  parseIdList($('recAppIds').value),
   });
   $('btnStopRecord').onclick = () => send({ cmd: 'stopRecording' });
 

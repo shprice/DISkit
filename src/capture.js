@@ -5,7 +5,7 @@
 
 import dgram from 'dgram';
 import path from 'path';
-import { parseHeader } from './dis/pdu.js';
+import { parseHeader, parseSiteApp } from './dis/pdu.js';
 import { decodeBody } from './dis/decoders.js';
 import { LogWriter, writeMeta } from './logformat.js';
 
@@ -20,6 +20,8 @@ export class Capture {
     this.recorder = null;              // LogWriter
     this.recordFilter = new Set();     // allow-list by PDU type; empty = all
     this.versionFilter = new Set();    // allow-list by protocol version; empty = all
+    this.siteFilter = new Set();   // allow-list by site ID; empty = all
+    this.appFilter  = new Set();   // allow-list by application ID; empty = all
     this.recordPath = null;
     this.captureStartHr = 0n;
     this.recordedCount = 0;
@@ -72,12 +74,16 @@ export class Capture {
     const header = parseHeader(msg);
     if (!header) return;
     const body = decodeBody(header.pduType, msg);
-    if (this.stats) this.stats.ingest(header, body, msg.length);
+    if (this.stats) this.stats.ingest(header, body, msg.length, msg);
 
     if (this.recorder) {
+      const siteApp = parseSiteApp(msg);
+      const siteOk = !siteApp || this.siteFilter.size === 0 || this.siteFilter.has(siteApp.site);
+      const appOk  = !siteApp || this.appFilter.size  === 0 || this.appFilter.has(siteApp.application);
       const allowed =
-        (this.recordFilter.size === 0 || this.recordFilter.has(header.pduType)) &&
-        (this.versionFilter.size === 0 || this.versionFilter.has(header.protocolVersion));
+        (this.recordFilter.size  === 0 || this.recordFilter.has(header.pduType)) &&
+        (this.versionFilter.size === 0 || this.versionFilter.has(header.protocolVersion)) &&
+        siteOk && appOk;
       if (allowed) {
         const offsetMicros = Number(process.hrtime.bigint() - this.captureStartHr) / 1000;
         this.recorder.write(offsetMicros, rinfo.port || this.opts.port, msg);
@@ -101,10 +107,16 @@ export class Capture {
     this.versionFilter = new Set((versions || []).map(Number));
   }
 
-  startRecording(filePath, filterTypes, versionFilter) {
+  setSiteAppFilter(sites, apps) {
+    this.siteFilter = new Set((sites || []).map(Number));
+    this.appFilter  = new Set((apps  || []).map(Number));
+  }
+
+  startRecording(filePath, filterTypes, versionFilter, siteFilter, appFilter) {
     if (this.recorder) this.stopRecording();
     this.setRecordFilter(filterTypes);
     this.setVersionFilter(versionFilter);
+    this.setSiteAppFilter(siteFilter, appFilter);
     this.recorder = new LogWriter(filePath, Date.now());
     this.recordPath = filePath;
     this.captureStartHr = process.hrtime.bigint();
@@ -129,6 +141,7 @@ export class Capture {
       multicastGroup: this.opts.multicastGroup || null,
       recordFilter: Array.from(this.recordFilter),
       versionFilter: Array.from(this.versionFilter),
+      siteFilter: Array.from(this.siteFilter), appFilter: Array.from(this.appFilter),
       typeCounts: this.stats ? this.stats.typeCounts : {},
       bookmarks: this.bookmarks.slice(),
     };

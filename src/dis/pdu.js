@@ -35,3 +35,11 @@ export function parsePdu(buf) {
   const body = decodeBody(header.pduType, buf);
   return { header, body };
 }
+
+// Extract the originating entity's site and application ID (bytes 12-15).
+// Present in nearly all entity-bearing PDU types. Returns null if the buffer
+// is too short to contain an entity ID.
+export function parseSiteApp(buf) {
+  if (!buf || buf.length < 18) return null;
+  return { site: buf.readUInt16BE(12), application: buf.readUInt16BE(14) };
+}

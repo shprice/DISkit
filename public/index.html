@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DISLogger — IEEE 1278 DIS Logger / Replay</title>
+  <title>DISkit — IEEE 1278 DIS Toolkit</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>DISLogger</h1>
-    <span class="sub">IEEE 1278 DIS capture &amp; replay</span>
+    <h1>DISkit</h1>
+    <span class="sub">IEEE 1278 DIS Toolkit</span>
     <span id="conn" class="badge off">disconnected</span>
     <span id="modeBadge" class="badge idle">idle</span>
     <span id="recBadge" class="badge rec hidden">● REC</span>
@@ -45,13 +45,13 @@
             <label class="grow">File <input id="recName" type="text" placeholder="(auto timestamp).dislog" /></label>
           </div>
           <div class="row">
-            <span class="hint">Record filter — only ticked PDU types are logged:</span>
+            <label class="grow">PDU types <div id="recFilter" class="multiselect"></div></label>
+            <label class="grow">DIS versions <div id="recVersionFilter" class="multiselect"></div></label>
           </div>
-          <div class="row"><label class="chk"><input id="recAll" type="checkbox" checked /> (De)select all</label></div>
-          <div id="recFilter" class="filtergrid"></div>
-          <div class="row"><span class="hint">Version filter — only ticked DIS versions are recorded:</span></div>
-          <div class="row"><label class="chk"><input id="recVerAll" type="checkbox" checked /> (De)select all</label></div>
-          <div id="recVersionFilter" class="filtergrid vfgrid"></div>
+          <div class="row">
+            <label class="grow">Site IDs <input id="recSiteIds" type="text" placeholder="blank = all, e.g. 1,2" /></label>
+            <label class="grow">App IDs <input id="recAppIds" type="text" placeholder="blank = all, e.g. 1" /></label>
+          </div>
           <div class="row">
             <button id="btnRecord" class="rec">● Record</button>
             <button id="btnStopRecord">Stop Recording</button>
@@ -121,14 +121,15 @@
         </div>
         <div id="progText" class="hint"></div>
         <fieldset>
-          <legend>Replay type filter — only ticked types are sent</legend>
-          <div class="row"><label class="chk"><input id="repAll" type="checkbox" checked /> (De)select all</label></div>
-          <div id="repFilter" class="filtergrid"></div>
-        </fieldset>
-        <fieldset>
-          <legend>Version filter — only ticked DIS versions are sent</legend>
-          <div class="row"><label class="chk"><input id="repVerAll" type="checkbox" checked /> (De)select all</label></div>
-          <div id="repVersionFilter" class="filtergrid vfgrid"></div>
+          <legend>Replay filters</legend>
+          <div class="row">
+            <label class="grow">PDU types <div id="repFilter" class="multiselect"></div></label>
+            <label class="grow">DIS versions <div id="repVersionFilter" class="multiselect"></div></label>
+          </div>
+          <div class="row">
+            <label class="grow">Site IDs <input id="repSiteIds" type="text" placeholder="blank = all, e.g. 1,2" /></label>
+            <label class="grow">App IDs <input id="repAppIds" type="text" placeholder="blank = all, e.g. 1" /></label>
+          </div>
         </fieldset>
         <div class="row">
           <button id="btnExportPcap">Export selected to PCAP</button>
@@ -149,6 +150,18 @@
       <div class="pdurow">
         <canvas id="pieChart" width="150" height="150"></canvas>
         <div id="typeChart" class="chart"></div>
+      </div>
+      <h3>Site &amp; Application</h3>
+      <div class="siteapprow">
+        <div class="sapanel">
+          <canvas id="sitePie" width="90" height="90"></canvas>
+          <div class="hint">Site ID</div>
+        </div>
+        <div class="sapanel">
+          <canvas id="appPie" width="90" height="90"></canvas>
+          <div class="hint">App ID</div>
+        </div>
+        <div id="siteAppLegend" class="chart salegend"></div>
       </div>
     </section>
 

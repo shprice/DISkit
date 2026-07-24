@@ -6,7 +6,7 @@
 
 import dgram from 'dgram';
 import { LogReader, readMeta } from './logformat.js';
-import { parseHeader } from './dis/pdu.js';
+import { parseHeader, parseSiteApp } from './dis/pdu.js';
 import { decodeBody } from './dis/decoders.js';
 import { PduMinVersion } from './dis/enums.js';
 
@@ -27,6 +27,8 @@ export class Player {
     this.loop = false;
     this.typeFilter = new Set();
     this.versionFilter = new Set();
+    this.siteFilter = new Set();
+    this.appFilter  = new Set();
     this.replayAsVersion = null;    // null = send as-is; number = rewrite version byte
     this.meta = null;
     this.sentCount = 0;
@@ -46,13 +48,15 @@ export class Player {
     return this.meta;
   }
 
-  play({ speed = 1, loop = false, typeFilter = [], versionFilter = [], replayAsVersion = null } = {}) {
+  play({ speed = 1, loop = false, typeFilter = [], versionFilter = [], replayAsVersion = null, siteFilter = [], appFilter = [] } = {}) {
     if (!this.reader) throw new Error('No log loaded');
     this.speed = Math.max(0.01, speed);
     this.loop = !!loop;
     this.typeFilter = new Set((typeFilter || []).map(Number));
     this.versionFilter = new Set((versionFilter || []).map(Number));
     this.replayAsVersion = replayAsVersion || null;
+    this.siteFilter = new Set((siteFilter || []).map(Number));
+    this.appFilter  = new Set((appFilter  || []).map(Number));
     this.versionWarnings = 0;
     this._warnedTypes = new Set();
 
@@ -107,6 +111,13 @@ export class Player {
     if (!header) return;
     if (this.typeFilter.size && !this.typeFilter.has(header.pduType)) return;
     if (this.versionFilter.size && !this.versionFilter.has(header.protocolVersion)) return;
+    if (this.siteFilter.size || this.appFilter.size) {
+      const sa = parseSiteApp(rec.pdu);
+      if (sa) {
+        if (this.siteFilter.size && !this.siteFilter.has(sa.site))        return;
+        if (this.appFilter.size  && !this.appFilter.has(sa.application))  return;
+      }
+    }
 
     let pdu = rec.pdu;
     if (this.replayAsVersion !== null && header.protocolVersion !== this.replayAsVersion) {
@@ -136,7 +147,7 @@ export class Player {
     this.sentCount += 1;
 
     const body = decodeBody(header.pduType, rec.pdu);
-    if (this.stats) this.stats.ingest(header, body, rec.pdu.length);
+    if (this.stats) this.stats.ingest(header, body, rec.pdu.length, rec.pdu);
 
     const now = Date.now();
     if (now - this._lastSample > 50) {

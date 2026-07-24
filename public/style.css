@@ -98,10 +98,43 @@ fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 10px 0; pa
 legend { color: var(--muted); padding: 0 6px; font-size: 11px; }
 .hint { color: var(--muted); font-size: 11px; }
 
-.filtergrid { display: grid; grid-template-columns: 1fr; gap: 2px; max-height: 180px; overflow: auto;
-  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--bg); }
-.vfgrid { max-height: 120px; }
-.filtergrid label { flex-direction: row; align-items: center; gap: 6px; font-size: 11px; padding: 1px 0; }
+/* Disabled inputs are visually greyed out */
+input:disabled, select:disabled {
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Active button state (e.g. Listening, Playing) */
+button.active { background: var(--green); border-color: var(--green); color: #0d1117; }
+
+/* Multi-select dropdown */
+.multiselect { position: relative; display: block; }
+.ms-btn {
+  width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--line);
+  color: var(--fg); border-radius: 5px; padding: 5px 8px; font-size: 11px;
+  cursor: pointer; font: inherit; font-size: 11px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ms-btn:hover { border-color: var(--accent); }
+.ms-panel {
+  display: none; position: absolute; z-index: 200; top: calc(100% + 2px); left: 0; right: 0;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; max-height: 210px; overflow-y: auto; min-width: 180px;
+}
+.multiselect.open .ms-panel { display: block; }
+.ms-panel label {
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
+  font-size: 11px; padding: 2px 0; color: var(--fg); cursor: pointer;
+}
+.ms-panel label:hover { color: var(--accent); }
+.ms-sep { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
+.ms-all { font-weight: 600; }
+
+/* Site/App distribution charts */
+.siteapprow { display: flex; gap: 12px; align-items: flex-start; margin-top: 4px; }
+.sapanel { text-align: center; flex: 0 0 auto; }
+.salegend { font-size: 10px; }
 
 .metrics { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .metric {

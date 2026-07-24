@@ -15,6 +15,8 @@ export class Stats {
   reset() {
     this.typeCounts = {};       // pduType -> count
     this.familyCounts = {};     // familyName -> count
+    this.siteCounts = {};       // site ID -> count
+    this.appCounts = {};        // application ID -> count
     this.totalPdus = 0;
     this.totalBytes = 0;
     this.entities = new Map();  // key -> entity record
@@ -24,13 +26,19 @@ export class Stats {
   }
 
   // header: parsed common header. body: decoded body (may be null).
-  ingest(header, body, byteLen) {
+  ingest(header, body, byteLen, rawBuf) {
     const now = Date.now();
     this.totalPdus += 1;
     this.totalBytes += byteLen || 0;
     this.typeCounts[header.pduType] = (this.typeCounts[header.pduType] || 0) + 1;
     this.familyCounts[header.protocolFamilyName] =
       (this.familyCounts[header.protocolFamilyName] || 0) + 1;
+    if (rawBuf && rawBuf.length >= 18) {
+      const site = rawBuf.readUInt16BE(12);
+      const app  = rawBuf.readUInt16BE(14);
+      this.siteCounts[site] = (this.siteCounts[site] || 0) + 1;
+      this.appCounts[app]   = (this.appCounts[app]   || 0) + 1;
+    }
 
     this.rateWindow.push(now);
     if (this.rateWindow.length > 2000) this.rateWindow.shift();
@@ -91,6 +99,12 @@ export class Stats {
     const families = Object.entries(this.familyCounts)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
+    const sites = Object.entries(this.siteCounts)
+      .map(([id, count]) => ({ id: Number(id), count }))
+      .sort((a, b) => b.count - a.count);
+    const apps = Object.entries(this.appCounts)
+      .map(([id, count]) => ({ id: Number(id), count }))
+      .sort((a, b) => b.count - a.count);
 
     // Flatten active emitters into beam rows for the panel.
     const emitterRows = [];
@@ -118,6 +132,8 @@ export class Stats {
       emitterCount: this.emitters.size,
       types,
       families,
+      sites,
+      apps,
       entities: Array.from(this.entities.values()),
       emitters: emitterRows,
     };
