@@ -20,6 +20,8 @@ const FORCE = { 0: 'Other', 1: 'Friendly', 2: 'Opposing', 3: 'Neutral' };
 const PIE_COLORS = ['#2f81f7', '#3fb950', '#d29922', '#f85149', '#a371f7', '#39c5cf',
   '#db61a2', '#e3b341', '#6e7681', '#ff7b72', '#56d364', '#79c0ff'];
 
+const pieHitData = {};
+
 let ws;
 let logs = [];
 let appMode = 'idle';
@@ -144,14 +146,27 @@ function setMode(mode) {
   const listening = mode === 'capturing';
   $('btnListen').textContent = listening ? '◉ Listening…' : 'Start Listening';
   $('btnListen').className   = listening ? 'active' : 'primary';
-  $('btnPlay').className     = mode === 'replaying' ? 'active' : 'primary';
+  if (mode === 'replaying') {
+    $('btnPlay').innerHTML   = '<span class="spinner"></span>Playing…';
+    $('btnPlay').className   = 'active';
+  } else {
+    $('btnPlay').textContent = '▶ Play';
+    $('btnPlay').className   = 'primary';
+  }
 }
 
 function setRecording(on, startMs, bytes) {
   const badge = $('recBadge');
   badge.classList.toggle('hidden', !on);
   if (on) badge.textContent = `● REC ${hms(Date.now() - (startMs || Date.now()))} · ${fmtBytes(bytes)}`;
-  $('btnRecord').disabled = !!on;
+  const btn = $('btnRecord');
+  btn.disabled = !!on;
+  btn.classList.toggle('is-recording', !!on);
+  if (on) {
+    btn.innerHTML  = '<span class="rec-dot"></span>Recording…';
+  } else {
+    btn.textContent = '● Record';
+  }
   $('btnStopRecord').disabled = !on;
   $('btnBookmark').disabled = !on;
   $('bmLabel').disabled = !on;
@@ -224,6 +239,7 @@ function hms(ms) {
 
 // ---- rendering -------------------------------------------------------------
 function fmt(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+function unCamel(s) { return s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2'); }
 
 function renderStats(s) {
   if (!s) return;
@@ -231,20 +247,11 @@ function renderStats(s) {
   $('mRate').textContent = s.pduRate;
   $('mEntities').textContent = s.entityCount;
   $('mEmitters').textContent = s.emitterCount;
-  $('mBytes').textContent = Math.round(s.totalBytes / 1024);
+  $('mBytes').textContent = fmtBytes(s.totalBytes);
 
-  $('typeChart').innerHTML = s.types.map((t, i) =>
-    `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>${t.name}</span><span class="val">${fmt(t.count)}</span></div>`
-  ).join('');
-  drawPie('pieChart', s.types, 'PDUs');
-  drawPie('sitePie',  s.sites, 'Sites');
-  drawPie('appPie',   s.apps,  'Apps');
-  $('siteLegend').innerHTML = (s.sites || []).map((x, i) =>
-    `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>Site ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`
-  ).join('') || '<span class="hint" style="padding:2px 0">no data</span>';
-  $('appLegend').innerHTML = (s.apps || []).map((x, i) =>
-    `<div class="bar"><span class="name"><span class="swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span>App ${x.id}</span><span class="val">${fmt(x.count)}</span></div>`
-  ).join('') || '<span class="hint" style="padding:2px 0">no data</span>';
+  drawPie('pieChart', (s.types || []).map(t => ({ count: t.count, label: unCamel(t.name) })), 'PDUs');
+  drawPie('sitePie',  (s.sites || []).map(x => ({ count: x.count, label: `Site ${x.id}` })), 'Sites');
+  drawPie('appPie',   (s.apps  || []).map(x => ({ count: x.count, label: `App ${x.id}` })), 'Apps');
 
   const eb = $('entityTable').querySelector('tbody');
   eb.innerHTML = s.entities.map((e) => `
@@ -264,7 +271,7 @@ function renderStats(s) {
 }
 function fnum(v, d) { return (v === undefined || v === null || !isFinite(v)) ? '' : Number(v).toFixed(d); }
 
-// Donut/pie chart of PDU type distribution (same colour order as the bars).
+// Donut/pie chart. data items: { count, label }. Stores segments for hover hit-testing.
 function drawPie(canvasId, data, centerLabel) {
   const c = $(canvasId);
   if (!c) return;
@@ -273,17 +280,22 @@ function drawPie(canvasId, data, centerLabel) {
   ctx.clearRect(0, 0, w, h);
   const total = (data || []).reduce((s, d) => s + d.count, 0);
   if (!total) {
+    pieHitData[canvasId] = null;
     ctx.fillStyle = '#5c6b7a'; ctx.font = '9px system-ui';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('no data', cx, cy);
     ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic'; return;
   }
+  const ir = r * 0.54;
   let a = -Math.PI / 2;
+  const segments = [];
   data.forEach((d, i) => {
     const a2 = a + (d.count / total) * 2 * Math.PI;
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a, a2); ctx.closePath();
-    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length]; ctx.fill(); a = a2;
+    ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length]; ctx.fill();
+    segments.push({ startAngle: a, endAngle: a2, count: d.count, label: d.label || '' });
+    a = a2;
   });
-  const ir = r * 0.54;
+  pieHitData[canvasId] = { segments, cx, cy, r, ir };
   ctx.beginPath(); ctx.arc(cx, cy, ir, 0, 2 * Math.PI);
   ctx.fillStyle = '#161b22'; ctx.fill();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -291,6 +303,51 @@ function drawPie(canvasId, data, centerLabel) {
   ctx.fillText(fmt(total), cx, centerLabel ? cy - 4 : cy);
   if (centerLabel) { ctx.fillStyle = '#8b97a7'; ctx.font = '9px system-ui'; ctx.fillText(centerLabel, cx, cy + 8); }
   ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+}
+
+let _pieTooltipEl = null;
+function showPieTooltip(x, y, label, count) {
+  if (!_pieTooltipEl) {
+    _pieTooltipEl = document.createElement('div');
+    Object.assign(_pieTooltipEl.style, {
+      position: 'fixed', pointerEvents: 'none', zIndex: '9000',
+      background: '#1c2430', border: '1px solid #2b3441',
+      padding: '5px 10px', borderRadius: '6px',
+      fontSize: '11px', color: '#d7dde5', whiteSpace: 'nowrap',
+    });
+    document.body.appendChild(_pieTooltipEl);
+  }
+  _pieTooltipEl.textContent = `${label} — ${fmt(count)}`;
+  _pieTooltipEl.style.display = 'block';
+  _pieTooltipEl.style.left = (x + 12) + 'px';
+  _pieTooltipEl.style.top = (y - 8) + 'px';
+  const r = _pieTooltipEl.getBoundingClientRect();
+  if (r.right > window.innerWidth - 4) _pieTooltipEl.style.left = (x - r.width - 8) + 'px';
+  if (r.bottom > window.innerHeight - 4) _pieTooltipEl.style.top = (y - r.height - 4) + 'px';
+}
+function hidePieTooltip() { if (_pieTooltipEl) _pieTooltipEl.style.display = 'none'; }
+
+function setupPieTooltips() {
+  ['pieChart', 'sitePie', 'appPie'].forEach(id => {
+    const c = $(id);
+    if (!c) return;
+    c.addEventListener('mousemove', (e) => {
+      const data = pieHitData[id];
+      if (!data || !data.segments.length) { hidePieTooltip(); return; }
+      const rect = c.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (c.width / rect.width);
+      const my = (e.clientY - rect.top) * (c.height / rect.height);
+      const dx = mx - data.cx, dy = my - data.cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > data.r || dist < data.ir) { hidePieTooltip(); return; }
+      let angle = Math.atan2(dy, dx);
+      if (angle < -Math.PI / 2) angle += 2 * Math.PI;
+      const seg = data.segments.find(s => angle >= s.startAngle && angle < s.endAngle);
+      if (seg) showPieTooltip(e.clientX, e.clientY, seg.label, seg.count);
+      else hidePieTooltip();
+    });
+    c.addEventListener('mouseleave', hidePieTooltip);
+  });
 }
 
 let feedLines = [];
@@ -450,6 +507,13 @@ function init() {
   $('mapReset').onclick = () => window.MapView.resetView();
   window.MapView.setTiles(false, $('mapInfo'));
   setRecording(false);
+
+  setupPieTooltips();
+
+  $('consoleTab').addEventListener('click', () => {
+    const open = $('consoleDrawer').classList.toggle('open');
+    $('consoleChevron').textContent = open ? '▼' : '▲';
+  });
 
   connect();
 }

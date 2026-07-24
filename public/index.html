@@ -139,33 +139,27 @@
     </section>
 
     <section class="panel stats">
+      <h3>PDU Stats</h3>
       <div class="metrics">
         <div class="metric"><span id="mPdus">0</span><label>PDUs</label></div>
         <div class="metric"><span id="mRate">0</span><label>PDU/s</label></div>
         <div class="metric"><span id="mEntities">0</span><label>Entities</label></div>
         <div class="metric"><span id="mEmitters">0</span><label>Emitters</label></div>
-        <div class="metric"><span id="mBytes">0</span><label>KB</label></div>
+        <div class="metric"><span id="mBytes">0 KB</span><label>Data</label></div>
       </div>
-      <div class="pielegrow">
-        <div class="sapanel">
-          <canvas id="pieChart" width="90" height="90"></canvas>
+      <div class="pietriptych">
+        <div class="pieunit">
+          <canvas id="pieChart" width="130" height="130"></canvas>
           <div class="hint">PDU Types</div>
         </div>
-        <div class="pielegend" id="typeChart"></div>
-      </div>
-      <div class="pielegrow">
-        <div class="sapanel">
-          <canvas id="sitePie" width="90" height="90"></canvas>
+        <div class="pieunit">
+          <canvas id="sitePie" width="130" height="130"></canvas>
           <div class="hint">Site ID</div>
         </div>
-        <div class="pielegend" id="siteLegend"></div>
-      </div>
-      <div class="pielegrow">
-        <div class="sapanel">
-          <canvas id="appPie" width="90" height="90"></canvas>
+        <div class="pieunit">
+          <canvas id="appPie" width="130" height="130"></canvas>
           <div class="hint">App ID</div>
         </div>
-        <div class="pielegend" id="appLegend"></div>
       </div>
     </section>
 
@@ -202,11 +196,17 @@
       </div>
     </section>
 
-    <section class="panel console">
-      <h3>Console</h3>
-      <div id="feed" class="feed"></div>
-    </section>
   </main>
+
+  <div class="console-drawer" id="consoleDrawer">
+    <div class="console-tab" id="consoleTab">
+      <span class="console-title">Console</span>
+      <span class="console-chevron" id="consoleChevron">▲</span>
+    </div>
+    <div class="console-body">
+      <div id="feed" class="feed"></div>
+    </div>
+  </div>
 
   <script src="map.js"></script>
   <script src="app.js"></script>
