@@ -7,7 +7,7 @@ import dgram from 'dgram';
 import path from 'path';
 import { parseHeader, parseSiteApp } from './dis/pdu.js';
 import { decodeBody } from './dis/decoders.js';
-import { LogWriter, writeMeta } from './logformat.js';
+import { LogWriter, sealZipLog } from './logformat.js';
 
 export class Capture {
   constructor(opts, hooks = {}) {
@@ -117,8 +117,11 @@ export class Capture {
     this.setRecordFilter(filterTypes);
     this.setVersionFilter(versionFilter);
     this.setSiteAppFilter(siteFilter, appFilter);
-    this.recorder = new LogWriter(filePath, Date.now());
+    // Write the raw binary to a temp file; sealZipLog() packages it on stop.
+    const binPath = filePath + '.bin';
+    this.recorder = new LogWriter(binPath, Date.now());
     this.recordPath = filePath;
+    this.binPath = binPath;
     this.captureStartHr = process.hrtime.bigint();
     this.recordedCount = 0;
     this.bookmarks = [];
@@ -145,10 +148,12 @@ export class Capture {
       typeCounts: this.stats ? this.stats.typeCounts : {},
       bookmarks: this.bookmarks.slice(),
     };
-    writeMeta(this.recordPath, meta);
+    // Package binary + meta into a single ZIP container (.dislog).
+    sealZipLog(this.binPath, meta, this.recordPath);
     this.recorder = null;
     const result = { ...meta, path: this.recordPath };
     this.recordPath = null;
+    this.binPath = null;
     return result;
   }
 

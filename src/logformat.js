@@ -1,6 +1,11 @@
-// Compact binary log format for recorded DIS traffic.
+// Compact binary log format for recorded DIS traffic, packaged as a ZIP
+// container so the binary data and JSON metadata travel as a single file.
 //
-// File layout:
+// ZIP container entries:
+//   capture.bin   — raw binary stream (DISLOG01 format below)
+//   meta.json     — capture config, duration, type counts, bookmarks
+//
+// capture.bin layout:
 //   [32-byte file header]
 //     0..7   magic            "DISLOG01"
 //     8..9   format version   uint16 (=1)
@@ -13,16 +18,36 @@
 //     10..11 pdu length        uint16
 //     12..   pdu bytes
 //
-// A sidecar "<file>.meta.json" stores the capture config, duration and PDU
-// type counts so summaries can be shown without scanning the whole file.
+// Legacy files: a plain binary .dislog + sidecar .dislog.meta.json are still
+// read transparently — the reader detects the format from magic bytes.
 
 import fs from 'fs';
+import AdmZip from 'adm-zip';
 
 const MAGIC = 'DISLOG01';
 const FILE_HEADER_LEN = 32;
 const REC_HEADER_LEN = 12;
 export const FORMAT_VERSION = 1;
 
+function peekMagic(path) {
+  try {
+    const buf = Buffer.alloc(2);
+    const fd = fs.openSync(path, 'r');
+    fs.readSync(fd, buf, 0, 2, 0);
+    fs.closeSync(fd);
+    return buf;
+  } catch { return Buffer.alloc(2); }
+}
+
+function isZip(path) {
+  const m = peekMagic(path);
+  return m[0] === 0x50 && m[1] === 0x4B; // 'PK'
+}
+
+// --- Write -------------------------------------------------------------------
+
+// During capture, records stream to a plain binary temp file (.dislog.bin).
+// On stopRecording(), sealZipLog() packages it into the final .dislog ZIP.
 export class LogWriter {
   constructor(path, startWallClockMs = Date.now()) {
     this.path = path;
@@ -38,7 +63,6 @@ export class LogWriter {
     fs.writeSync(this.fd, head);
   }
 
-  // offsetMicros: microseconds since capture start. pdu: Buffer.
   write(offsetMicros, port, pdu) {
     const rec = Buffer.alloc(REC_HEADER_LEN);
     rec.writeBigUInt64LE(BigInt(Math.max(0, Math.round(offsetMicros))), 0);
@@ -59,24 +83,53 @@ export class LogWriter {
   }
 }
 
+// Package the temp binary + meta into a ZIP at outputPath, then delete binPath.
+export function sealZipLog(binPath, metaObj, outputPath) {
+  const zip = new AdmZip();
+  zip.addLocalFile(binPath, '', 'capture.bin');
+  zip.addFile('meta.json', Buffer.from(JSON.stringify(metaObj, null, 2)));
+  zip.writeZip(outputPath);
+  fs.unlinkSync(binPath);
+}
+
+// Legacy helper kept for any code that writes the old two-file format.
 export function writeMeta(path, meta) {
   fs.writeFileSync(`${path}.meta.json`, JSON.stringify(meta, null, 2));
 }
 
+// --- Read --------------------------------------------------------------------
+
 export function readMeta(path) {
   try {
+    if (isZip(path)) {
+      const zip = new AdmZip(path);
+      const entry = zip.getEntry('meta.json');
+      return entry ? JSON.parse(entry.getData().toString('utf8')) : null;
+    }
+    // Legacy: sidecar .meta.json
     return JSON.parse(fs.readFileSync(`${path}.meta.json`, 'utf8'));
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// Streaming reader. Reads records sequentially on demand so large files don't
-// have to be held in memory. Call reset() to rewind for looping.
+// Streaming reader. Handles both ZIP containers and legacy plain binary files.
+// For ZIP files a temporary extraction is used so the existing seek-based read
+// logic works unchanged; the temp file is cleaned up on close().
 export class LogReader {
   constructor(path) {
     this.path = path;
-    this.fd = fs.openSync(path, 'r');
+    this.tmpPath = null;
+
+    let binPath = path;
+    if (isZip(path)) {
+      const zip = new AdmZip(path);
+      const entry = zip.getEntry('capture.bin');
+      if (!entry) throw new Error('Not a valid DISLOG container (missing capture.bin)');
+      this.tmpPath = path + '.~r';
+      fs.writeFileSync(this.tmpPath, entry.getData());
+      binPath = this.tmpPath;
+    }
+
+    this.fd = fs.openSync(binPath, 'r');
     const head = Buffer.alloc(FILE_HEADER_LEN);
     fs.readSync(this.fd, head, 0, FILE_HEADER_LEN, 0);
     if (head.toString('ascii', 0, 8) !== MAGIC) {
@@ -89,7 +142,6 @@ export class LogReader {
     this.size = fs.fstatSync(this.fd).size;
   }
 
-  // Returns { offsetMicros, port, pdu } or null at end of file.
   readNext() {
     if (this.pos + REC_HEADER_LEN > this.size) return null;
     const rec = Buffer.alloc(REC_HEADER_LEN);
@@ -113,6 +165,10 @@ export class LogReader {
     if (this.fd != null) {
       fs.closeSync(this.fd);
       this.fd = null;
+    }
+    if (this.tmpPath) {
+      try { fs.unlinkSync(this.tmpPath); } catch {}
+      this.tmpPath = null;
     }
   }
 }
