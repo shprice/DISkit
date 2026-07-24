@@ -6,6 +6,7 @@ import { pduTypeName } from './dis/enums.js';
 
 const ENTITY_TTL_MS = 12000;   // drop entities not heard from for this long
 const EMITTER_TTL_MS = 15000;
+const SIGNAL_TTL_MS  = 30000;
 
 export class Stats {
   constructor() {
@@ -19,12 +20,14 @@ export class Stats {
     this.appCounts = {};        // application ID -> count
     this.totalPdus = 0;
     this.totalBytes = 0;
-    this.entities = new Map();  // key -> entity record
-    this.emitters = new Map();  // emittingKey -> { systems, lastSeen }
-    this.fires = [];            // rolling log of last 200 Fire events
-    this.detonations = [];      // rolling log of last 200 Detonation events
+    this.entities = new Map();      // key -> entity record
+    this.emitters = new Map();      // emittingKey -> { systems, lastSeen }
+    this.fires = [];                // rolling log of last 200 Fire events
+    this.detonations = [];          // rolling log of last 200 Detonation events
+    this.transmitters = new Map();  // entityKey|radioId -> transmitter record
+    this.signalStates = new Map();  // entityKey|radioId -> latest signal state
     this.startTime = Date.now();
-    this.rateWindow = [];       // timestamps (ms) for PDU/s estimate
+    this.rateWindow = [];           // timestamps (ms) for PDU/s estimate
   }
 
   // header: parsed common header. body: decoded body (may be null).
@@ -63,6 +66,12 @@ export class Stats {
         orientation: body.orientation,
         appearance: body.appearance,
         capabilities: body.capabilities,
+        location: body.location,
+        drAlgorithm: body.drAlgorithm,
+        drLinearAcceleration: body.drLinearAcceleration,
+        drAngularVelocity: body.drAngularVelocity,
+        markingCharset: body.markingCharset,
+        articulationParams: body.articulationParams,
         lastSeen: now,
       });
     }
@@ -94,10 +103,33 @@ export class Stats {
     if (header.pduType === 23 && body && body.emittingKey) {
       this.emitters.set(body.emittingKey, {
         key: body.emittingKey,
+        stateUpdateIndicator: body.stateUpdateIndicator,
         numSystems: body.numSystems,
         systems: body.systems,
         lastSeen: now,
       });
+    }
+
+    if (header.pduType === 25 && body && body.entityIdKey) {
+      const key = `${body.entityIdKey}|${body.radioId}`;
+      this.transmitters.set(key, {
+        _key: key,
+        entityKey: body.entityIdKey,
+        radioId: body.radioId,
+        txState: body.txState,
+        txStateName: body.txState === 1 ? 'On' : 'Off',
+        frequency: body.frequency,
+        freqMHz: body.frequency ? +(body.frequency / 1e6).toFixed(3) : 0,
+        band: body.band,
+        power: body.power ? +body.power.toFixed(1) : 0,
+        geo: body.geo,
+        lastSeen: now,
+      });
+    }
+
+    if (header.pduType === 26 && body && body.entityIdKey) {
+      const key = body._key || `${body.entityIdKey}|${body.radioId}`;
+      this.signalStates.set(key, { ...body, lastSeen: now });
     }
   }
 
@@ -108,6 +140,12 @@ export class Stats {
     }
     for (const [k, e] of this.emitters) {
       if (now - e.lastSeen > EMITTER_TTL_MS) this.emitters.delete(k);
+    }
+    for (const [k, t] of this.transmitters) {
+      if (now - t.lastSeen > EMITTER_TTL_MS) this.transmitters.delete(k);
+    }
+    for (const [k, s] of this.signalStates) {
+      if (now - s.lastSeen > SIGNAL_TTL_MS) this.signalStates.delete(k);
     }
   }
 
@@ -142,13 +180,28 @@ export class Stats {
       for (const sys of e.systems || []) {
         for (const beam of sys.beams || []) {
           emitterRows.push({
+            _key: `${e.key}|${sys.emitterNumber}|${beam.beamNumber}`,
             entity: e.key,
             emitter: sys.emitterName,
+            emitterName: sys.emitterName,
+            emitterNumber: sys.emitterNumber,
+            emitterFunction: sys.emitterFunction,
+            beamNumber: beam.beamNumber,
+            beamFunction: beam.beamFunctionName,
             function: beam.beamFunctionName,
             band: beam.band,
             freqMHz: beam.frequency ? +(beam.frequency / 1e6).toFixed(1) : 0,
             prf: beam.pulseRepetitionFreq ? Math.round(beam.pulseRepetitionFreq) : 0,
             erp: beam.effectiveRadiatedPower ? +beam.effectiveRadiatedPower.toFixed(1) : 0,
+            pulseWidth: beam.pulseWidth ? +beam.pulseWidth.toFixed(1) : 0,
+            azimuthCenter: beam.azimuthCenter ? +beam.azimuthCenter.toFixed(3) : 0,
+            azimuthSweep: beam.azimuthSweep ? +beam.azimuthSweep.toFixed(3) : 0,
+            elevationCenter: beam.elevationCenter ? +beam.elevationCenter.toFixed(3) : 0,
+            elevationSweep: beam.elevationSweep ? +beam.elevationSweep.toFixed(3) : 0,
+            numTargets: beam.numTargets || 0,
+            systemLocation: sys.location,
+            stateUpdateIndicator: e.stateUpdateIndicator,
+            lastSeen: e.lastSeen,
           });
         }
       }
@@ -168,6 +221,8 @@ export class Stats {
       emitters: emitterRows,
       fires: this.fires.slice(0, 100),
       detonations: this.detonations.slice(0, 100),
+      transmitters: Array.from(this.transmitters.values()),
+      signals: Array.from(this.signalStates.values()),
     };
   }
 }

@@ -71,9 +71,31 @@ function decodeEntityState(buf) {
     psi: buf.readFloatBE(o), theta: buf.readFloatBE(o + 4), phi: buf.readFloatBE(o + 8),
   }; o += 12;
   const appearance = buf.readUInt32BE(o); o += 4;
-  o += 40; // dead reckoning params
+  // Dead reckoning parameters (40 bytes)
+  const drAlgorithm = buf.readUInt8(o); o += 1;
+  o += 15; // other DR params (usually padding)
+  const drLinearAcceleration = {
+    x: buf.readFloatBE(o), y: buf.readFloatBE(o + 4), z: buf.readFloatBE(o + 8),
+  }; o += 12;
+  const drAngularVelocity = {
+    x: buf.readFloatBE(o), y: buf.readFloatBE(o + 4), z: buf.readFloatBE(o + 8),
+  }; o += 12;
+  const markingCharset = buf.readUInt8(o);
   const marking = readMarking(buf, o); o += 12;
   const capabilities = buf.readUInt32BE(o); o += 4;
+  // Articulation parameters (16 bytes each)
+  const articulationParams = [];
+  for (let i = 0; i < numArticulation; i++) {
+    if (o + 16 > buf.length) break;
+    articulationParams.push({
+      typeDesignator: buf.readUInt8(o),
+      changeIndicator: buf.readUInt8(o + 1),
+      attachmentId: buf.readUInt16BE(o + 2),
+      parameterType: buf.readUInt32BE(o + 4),
+      parameterValue: buf.readDoubleBE(o + 8),
+    });
+    o += 16;
+  }
 
   const geo = ecefToGeodetic(x, y, z);
   const speed = Math.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2);
@@ -92,8 +114,13 @@ function decodeEntityState(buf) {
     speed,
     orientation,
     appearance,
+    drAlgorithm,
+    drLinearAcceleration,
+    drAngularVelocity,
+    markingCharset,
     marking,
     capabilities,
+    articulationParams,
     headingDeg: ((orientation.psi * 180) / Math.PI + 360) % 360,
   };
 }
@@ -150,7 +177,7 @@ function decodeEmission(buf) {
   let o = HDR;
   const emittingEntity = readEntityId(buf, o); o += 6;
   o += 6; // event id
-  o += 1; // state update indicator
+  const stateUpdateIndicator = buf.readUInt8(o); o += 1;
   const numSystems = buf.readUInt8(o); o += 1;
   o += 2; // padding
   const systems = [];
@@ -163,7 +190,8 @@ function decodeEmission(buf) {
     const emitterFunction = buf.readUInt8(o + 2);
     const emitterNumber = buf.readUInt8(o + 3);
     o += 4;
-    o += 12; // location relative to entity (3 x float32)
+    const locX = buf.readFloatBE(o), locY = buf.readFloatBE(o + 4), locZ = buf.readFloatBE(o + 8);
+    o += 12;
     const beams = [];
     for (let b = 0; b < numBeams && o + 52 <= buf.length; b++) {
       const beamStart = o;
@@ -195,11 +223,11 @@ function decodeEmission(buf) {
       });
     }
     o = sysStart + (systemDataLength || (o - sysStart));
-    systems.push({ emitterName, emitterFunction, emitterNumber, numBeams, beams });
+    systems.push({ emitterName, emitterFunction, emitterNumber, numBeams, beams, location: { x: locX, y: locY, z: locZ } });
   }
   return {
     emittingEntity, emittingKey: entityIdKey(emittingEntity),
-    numSystems, systems,
+    stateUpdateIndicator, numSystems, systems,
   };
 }
 
@@ -244,6 +272,31 @@ function decodeTransmitter(buf) {
   };
 }
 
+// --- Signal PDU (type 26) ---------------------------------------------------
+const ENCODING_CLASS_NAMES = { 0: 'Encoded audio', 1: 'Raw binary', 2: 'Application specific', 3: 'Database index' };
+const TDL_TYPE_NAMES = { 0: 'Other', 1: 'PADIL', 2: 'NATO Link-1', 3: 'ATDL-1', 5: 'Link-11B', 6: 'SADL', 7: 'Link-11A', 8: 'Link-16' };
+
+function decodeSignal(buf) {
+  if (buf.length < HDR + 20) return { truncated: true };
+  let o = HDR;
+  const entityId = readEntityId(buf, o); o += 6;
+  const radioId = buf.readUInt16BE(o); o += 2;
+  const encodingWord = buf.readUInt16BE(o); o += 2;
+  const encodingClass = (encodingWord >> 14) & 0x3;
+  const encodingType = encodingWord & 0x3FFF;
+  const tdlType = buf.readUInt16BE(o); o += 2;
+  const sampleRate = buf.readUInt32BE(o); o += 4;
+  const dataLengthBits = buf.readUInt16BE(o); o += 2;
+  const numSamples = buf.readUInt16BE(o); o += 2;
+  const key = `${entityIdKey(entityId)}|${radioId}`;
+  return {
+    entityId, entityIdKey: entityIdKey(entityId), radioId,
+    encodingClass, encodingClassName: ENCODING_CLASS_NAMES[encodingClass] || 'Unknown',
+    encodingType, tdlType, tdlTypeName: TDL_TYPE_NAMES[tdlType] || `TDL ${tdlType}`,
+    sampleRate, dataLengthBits, numSamples, _key: key,
+  };
+}
+
 const decoderMap = {
   1: decodeEntityState,
   2: decodeFire,
@@ -251,6 +304,7 @@ const decoderMap = {
   23: decodeEmission,
   24: decodeDesignator,
   25: decodeTransmitter,
+  26: decodeSignal,
 };
 
 // Decode the body for a known PDU type. Returns null when no decoder exists

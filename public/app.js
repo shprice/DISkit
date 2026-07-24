@@ -8,6 +8,13 @@ const DIS_VERSIONS = {
   7: 'IEEE 1278.1-2012',
 };
 
+const DR_ALGORITHM = {
+  0:'Other', 1:'Static', 2:'Fixed Rate (world)', 3:'Fixed Rate+Vel (world)',
+  4:'Vel+Acc (world)', 5:'Fixed Pos (body)', 6:'Fixed Rate (body)',
+  7:'Fixed Rate+Vel (body)', 8:'Vel+Acc (body)', 9:'Quaternion',
+};
+const MARKING_CHARSET = { 0:'Unused', 1:'ASCII', 2:'Army Marking', 3:'Digit Chevron' };
+
 const PDU_TYPES = {
   1: 'EntityState', 2: 'Fire', 3: 'Detonation', 4: 'Collision',
   11: 'CreateEntity', 12: 'RemoveEntity', 13: 'StartResume', 14: 'StopFreeze',
@@ -165,6 +172,7 @@ function applyConfig(c) {
 }
 
 function setMode(mode) {
+  const prevMode = appMode;
   appMode = mode;
   const badge = $('modeBadge');
   const wasReplayingBadge = badge.classList.contains('replaying');
@@ -175,6 +183,13 @@ function setMode(mode) {
     badge.textContent = mode;
   }
   if (mode !== 'replaying') { playerState = 'idle'; $('btnPause').textContent = '⏸ Pause'; }
+  if (prevMode === 'replaying' && mode === 'idle') {
+    window.MapView?.update([]);
+    selectedKey = null; selectedType = null;
+    window.MapView?.setSelected(null);
+    const dc = $('detailsContent');
+    if (dc) dc.innerHTML = '<span class="hint">Select an entity or emitter</span>';
+  }
   const listening = mode === 'capturing';
   $('btnListen').textContent = listening ? '◉ Listening…' : 'Start Listening';
   $('btnListen').className   = listening ? 'active' : 'primary';
@@ -299,16 +314,36 @@ function renderStats(s) {
 
   const mb = $('emitterTable').querySelector('tbody');
   mb.innerHTML = s.emitters.map((r) => `
-    <tr data-key="${escapeHtml(r.entity + '|' + (r.emitter || ''))}">
-      <td>${escapeHtml(r.entity)}</td><td>${escapeHtml(r.emitter || '')}</td>
-      <td>${escapeHtml(r['function'] || '')}</td>
+    <tr data-key="${escapeHtml(r._key || r.entity + '|' + (r.emitter || ''))}">
+      <td>${escapeHtml(r.entity)}</td><td>${escapeHtml(String(r.emitterName ?? r.emitter ?? ''))}</td>
+      <td>${escapeHtml(r.beamFunction || r['function'] || '')}</td>
       <td>${escapeHtml(r.band || '')}</td><td>${r.freqMHz}</td><td>${r.prf}</td><td>${r.erp}</td>
     </tr>`).join('');
 
+  const txb = $('txTableBody');
+  if (txb) {
+    txb.innerHTML = (s.transmitters || []).map(t => `
+      <tr data-key="${escapeHtml(t._key)}">
+        <td>${escapeHtml(t.entityKey)}</td><td>${t.radioId}</td>
+        <td>${escapeHtml(t.txStateName)}</td><td>${t.freqMHz}</td>
+        <td>${escapeHtml(t.band || '—')}</td><td>${t.power}</td>
+      </tr>`).join('');
+  }
+  const sigb = $('sigTableBody');
+  if (sigb) {
+    sigb.innerHTML = (s.signals || []).map(sg => `
+      <tr data-key="${escapeHtml(sg._key)}">
+        <td>${escapeHtml(sg.entityIdKey)}</td><td>${sg.radioId}</td>
+        <td>${escapeHtml(sg.encodingClassName || '—')}</td>
+        <td>${escapeHtml(sg.tdlTypeName || '—')}</td>
+        <td>${sg.sampleRate || 0}</td><td>${sg.dataLengthBits || 0}</td>
+      </tr>`).join('');
+  }
+
   const fb = $('firesTableBody');
   if (fb) {
-    fb.innerHTML = (s.fires || []).map(f => `
-      <tr>
+    fb.innerHTML = (s.fires || []).map((f, i) => `
+      <tr data-key="${i}">
         <td>${ts2(f.ts)}</td><td>${escapeHtml(f.firingKey)}</td>
         <td>${escapeHtml(f.targetKey || '—')}</td>
         <td>${escapeHtml(f.munitionType || '—')}</td>
@@ -317,8 +352,8 @@ function renderStats(s) {
   }
   const db = $('detsTableBody');
   if (db) {
-    db.innerHTML = (s.detonations || []).map(d => `
-      <tr>
+    db.innerHTML = (s.detonations || []).map((d, i) => `
+      <tr data-key="${i}">
         <td>${ts2(d.ts)}</td><td>${escapeHtml(d.firingKey)}</td>
         <td>${escapeHtml(d.targetKey || '—')}</td>
         <td>${escapeHtml(d.munitionType || '—')}</td>
@@ -329,11 +364,15 @@ function renderStats(s) {
   // Persist selection highlight across re-renders; refresh details if data changed
   lastStats = s;
   if (selectedKey) {
-    const ent = selectedType === 'entity' ? s.entities?.find(x => x.key === selectedKey) : null;
-    const emit = selectedType === 'emitter' ? s.emitters?.find(x => (x.entity + '|' + (x.emitter||'')) === selectedKey) : null;
-    const fresh = ent || emit;
+    const ent  = selectedType === 'entity'      ? s.entities?.find(x => x.key === selectedKey)     : null;
+    const emit = selectedType === 'emitter'     ? s.emitters?.find(x => x._key === selectedKey)    : null;
+    const tx   = selectedType === 'transmitter' ? s.transmitters?.find(x => x._key === selectedKey): null;
+    const sig  = selectedType === 'signal'      ? s.signals?.find(x => x._key === selectedKey)     : null;
+    const fresh = ent || emit || tx || sig;
     if (fresh) renderDetails(fresh);
-    else { selectedKey = null; selectedType = null; renderDetails(null); }
+    else if (!selectedType?.startsWith('fire') && !selectedType?.startsWith('det')) {
+      selectedKey = null; selectedType = null; renderDetails(null);
+    }
   }
   applyTableSelection();
 
@@ -350,69 +389,252 @@ function selectItem(key, type, data) {
 }
 
 function applyTableSelection() {
-  document.querySelectorAll('#entityTable tbody tr').forEach(r =>
-    r.classList.toggle('selected', selectedType === 'entity' && r.dataset.key === selectedKey)
-  );
-  document.querySelectorAll('#emitterTable tbody tr').forEach(r =>
-    r.classList.toggle('selected', selectedType === 'emitter' && r.dataset.key === selectedKey)
-  );
+  const tbl = (id, type) => document.querySelectorAll(`#${id} tbody tr`).forEach(r =>
+    r.classList.toggle('selected', selectedType === type && r.dataset.key === selectedKey));
+  tbl('entityTable', 'entity');
+  tbl('emitterTable', 'emitter');
+  tbl('txTable', 'transmitter');
+  tbl('sigTable', 'signal');
+  // fires/detonations use index as key
+  document.querySelectorAll('#firesTable tbody tr').forEach(r =>
+    r.classList.toggle('selected', selectedType === 'fire' && selectedKey === `fire_${r.dataset.key}`));
+  document.querySelectorAll('#detsTable tbody tr').forEach(r =>
+    r.classList.toggle('selected', selectedType === 'detonation' && selectedKey === `det_${r.dataset.key}`));
+}
+
+function decodeAppearance(app, kind, domain) {
+  const b = (lo, len) => (app >>> lo) & ((1 << len) - 1);
+  if (kind === 1) {
+    const rows = [
+      ['Paintscheme', b(0,1) ? 'Camouflage' : 'Uniform'],
+      ['Propulsion', b(1,2) ? 'Kill' : 'OK'],
+      ['Firepower', b(3,2) ? 'Kill' : 'OK'],
+      ['Damage', ['None','Slight','Moderate','Destroyed'][b(5,2)]],
+    ];
+    const smoke = ['None','Engine exhaust','Emanating','Engine+Emanating'][b(7,2)];
+    if (smoke !== 'None') rows.push(['Smoke', smoke]);
+    if (b(9,1)) rows.push(['Flaming', 'Yes']);
+    rows.push(['Power plant', b(16,1) ? 'On' : 'Off']);
+    rows.push(['State', b(17,1) ? 'Deactivated' : 'Active']);
+    if (b(15,1)) rows.push(['Frozen', 'Yes']);
+    if (b(14,1)) rows.push(['Concealed', 'Yes']);
+    if (domain === 1) {
+      rows.push(['Camo type', ['Desert','Winter','Forest','Other'][b(12,2)]]);
+      if (b(18,1)) rows.push(['Tent', 'Raised']);
+      if (b(19,1)) rows.push(['Ramp', 'Up']);
+    } else if (domain === 2) {
+      if (b(9,1)) rows.push(['Afterburner', 'On']);
+      if (b(14,1)) rows.push(['Canopy', 'Open']);
+    }
+    return rows;
+  }
+  return [['Raw', `0x${(app>>>0).toString(16).toUpperCase().padStart(8,'0')}`]];
+}
+
+function decodeCapabilities(caps) {
+  const flags = [];
+  if (caps & 1) flags.push('Ammunition supply');
+  if (caps & 2) flags.push('Fuel supply');
+  if (caps & 4) flags.push('Recovery');
+  if (caps & 8) flags.push('Repair');
+  return flags.length ? flags : ['None'];
 }
 
 function renderDetails(data) {
   const el = $('detailsContent');
   if (!data) { el.innerHTML = '<span class="hint">Select an entity or emitter</span>'; return; }
+
   if (selectedType === 'entity') {
     const e = data;
     const typeLabel = lookupEntityType(e.type);
     const sidc = window.MapView?.entityToSidc?.(e);
     let iconHtml = '';
     if (sidc && window.ms) {
-      try {
-        const sym = new window.ms.Symbol(sidc, { size: 40 });
-        iconHtml = `<div style="margin-bottom:8px">${sym.asSVG()}</div>`;
-      } catch {}
+      try { iconHtml = `<div class="detail-symbol">${new window.ms.Symbol(sidc, { size: 48 }).asSVG()}</div>`; } catch {}
     }
+    const parts = (e.type || '0.0.0.0.0.0.0').split(/[.\-]/);
+    const kind = +parts[0]||0, domain = +parts[1]||0;
+    const r2d = r => isFinite(r) ? (r * 180 / Math.PI).toFixed(2) : '—';
+    const mToFt = m => isFinite(m) ? (m * 3.28084).toFixed(0) : '—';
+    const mpsToKts = v => isFinite(v) ? (v * 1.94384).toFixed(1) : '—';
+    const mpsToMph = v => isFinite(v) ? (v * 2.23694).toFixed(1) : '—';
+    const appRows = e.appearance != null ? decodeAppearance(e.appearance, kind, domain) : [];
+    const capFlags = e.capabilities != null ? decodeCapabilities(e.capabilities) : [];
     const hasVel = e.velocity && (e.velocity.x || e.velocity.y || e.velocity.z);
-    const hasOri = e.orientation && (e.orientation.psi || e.orientation.theta || e.orientation.phi);
-    const r2d = (r) => (r * 180 / Math.PI).toFixed(1);
-    const hdg = e.orientation ? (((e.orientation.psi * 180 / Math.PI) + 360) % 360).toFixed(1) : (fnum(e.heading, 1) || '—');
+    const hasOri = e.orientation;
+    const hasDR  = e.drAlgorithm != null;
+    const ls = e.lastSeen ? new Date(e.lastSeen).toTimeString().slice(0,8) : '—';
+    let climbRate = null;
+    if (hasVel && isFinite(e.lat) && isFinite(e.lon)) {
+      const lat = e.lat * Math.PI / 180, lon = e.lon * Math.PI / 180;
+      climbRate = e.velocity.x * Math.cos(lat)*Math.cos(lon) +
+                  e.velocity.y * Math.cos(lat)*Math.sin(lon) +
+                  e.velocity.z * Math.sin(lat);
+    }
     el.innerHTML = `
       ${iconHtml}
       <dl class="detail-list">
-        <dt>Marking</dt><dd>${escapeHtml(e.marking || '—')}</dd>
-        <dt>Force</dt><dd>${escapeHtml(e.force || '—')}</dd>
-        <dt>Type code</dt><dd>${escapeHtml(e.type || '—')}</dd>
+        <dt class="detail-section">Identity</dt>
+        <dt>Marking</dt><dd>${escapeHtml(e.marking||'—')}</dd>
+        <dt>Charset</dt><dd>${escapeHtml(MARKING_CHARSET[e.markingCharset] || (e.markingCharset != null ? String(e.markingCharset) : '—'))}</dd>
+        <dt>Force</dt><dd>${escapeHtml(e.force||'—')}</dd>
+        <dt>SIDC</dt><dd>${sidc||'—'}</dd>
+        <dt>Last seen</dt><dd>${ls}</dd>
+
+        <dt class="detail-section">Type</dt>
+        <dt>Type code</dt><dd>${escapeHtml(e.type||'—')}</dd>
         ${typeLabel ? `<dt>Type</dt><dd class="enum-type">${escapeHtml(typeLabel)}</dd>` : ''}
-        <dt>Kind</dt><dd>${escapeHtml(e.kind || '—')}</dd>
-        <dt>Domain</dt><dd>${escapeHtml(e.domain || '—')}</dd>
-        <dt>Latitude</dt><dd>${fnum(e.lat, 6) || '—'}</dd>
-        <dt>Longitude</dt><dd>${fnum(e.lon, 6) || '—'}</dd>
-        <dt>Altitude</dt><dd>${fnum(e.alt, 0) !== '' ? fnum(e.alt, 0) + ' m' : '—'}</dd>
-        <dt>Heading</dt><dd>${hdg}°</dd>
-        <dt>Speed</dt><dd>${fnum(e.speed, 1) !== '' ? fnum(e.speed, 1) + ' m/s' : '—'}</dd>
+        <dt>Kind</dt><dd>${escapeHtml(e.kind||'—')}</dd>
+        <dt>Domain</dt><dd>${escapeHtml(e.domain||'—')}</dd>
+
+        <dt class="detail-section">Position</dt>
+        <dt>Latitude</dt><dd>${fnum(e.lat,6)||'—'}</dd>
+        <dt>Longitude</dt><dd>${fnum(e.lon,6)||'—'}</dd>
+        <dt>Altitude</dt><dd>${fnum(e.alt,0)||'—'} m / ${mToFt(e.alt)} ft</dd>
+        ${e.location ? `
+        <dt>ECEF X</dt><dd>${fnum(e.location.x,0)} m</dd>
+        <dt>ECEF Y</dt><dd>${fnum(e.location.y,0)} m</dd>
+        <dt>ECEF Z</dt><dd>${fnum(e.location.z,0)} m</dd>` : ''}
+
+        <dt class="detail-section">Motion</dt>
+        <dt>Heading (ψ)</dt><dd>${hasOri ? (((e.orientation.psi*180/Math.PI)+360)%360).toFixed(2)+'°' : (fnum(e.heading,1)||'—')+'°'}</dd>
+        <dt>Speed</dt><dd>${fnum(e.speed,2)||'—'} m/s · ${mpsToKts(e.speed)} kts · ${mpsToMph(e.speed)} mph</dd>
+        ${climbRate != null ? `<dt>Climb rate</dt><dd>${climbRate.toFixed(2)} m/s</dd>` : ''}
         ${hasVel ? `
-        <dt class="detail-section" style="grid-column:1/-1">Velocity (ECEF m/s)</dt>
-        <dt>Vx</dt><dd>${fnum(e.velocity.x, 2)}</dd>
-        <dt>Vy</dt><dd>${fnum(e.velocity.y, 2)}</dd>
-        <dt>Vz</dt><dd>${fnum(e.velocity.z, 2)}</dd>` : ''}
+        <dt>ECEF Vx</dt><dd>${fnum(e.velocity.x,3)} m/s</dd>
+        <dt>ECEF Vy</dt><dd>${fnum(e.velocity.y,3)} m/s</dd>
+        <dt>ECEF Vz</dt><dd>${fnum(e.velocity.z,3)} m/s</dd>` : ''}
+
         ${hasOri ? `
-        <dt class="detail-section" style="grid-column:1/-1">Orientation</dt>
+        <dt class="detail-section">Orientation</dt>
         <dt>Pitch (θ)</dt><dd>${r2d(e.orientation.theta)}°</dd>
         <dt>Roll (φ)</dt><dd>${r2d(e.orientation.phi)}°</dd>` : ''}
-        ${e.appearance != null ? `<dt>Appearance</dt><dd>0x${(e.appearance >>> 0).toString(16).toUpperCase().padStart(8, '0')}</dd>` : ''}
-        ${e.capabilities != null ? `<dt>Capabilities</dt><dd>0x${(e.capabilities >>> 0).toString(16).toUpperCase().padStart(8, '0')}</dd>` : ''}
-        <dt>ID</dt><dd>${escapeHtml(e.key || '—')}</dd>
+
+        ${hasDR ? `
+        <dt class="detail-section">Dead Reckoning</dt>
+        <dt>Algorithm</dt><dd>${escapeHtml(DR_ALGORITHM[e.drAlgorithm]||String(e.drAlgorithm))}</dd>
+        ${e.drLinearAcceleration ? `
+        <dt>Lin Acc X</dt><dd>${fnum(e.drLinearAcceleration.x,4)} m/s²</dd>
+        <dt>Lin Acc Y</dt><dd>${fnum(e.drLinearAcceleration.y,4)} m/s²</dd>
+        <dt>Lin Acc Z</dt><dd>${fnum(e.drLinearAcceleration.z,4)} m/s²</dd>` : ''}
+        ${e.drAngularVelocity ? `
+        <dt>Ang Vel X</dt><dd>${fnum(e.drAngularVelocity.x,5)} rad/s</dd>
+        <dt>Ang Vel Y</dt><dd>${fnum(e.drAngularVelocity.y,5)} rad/s</dd>
+        <dt>Ang Vel Z</dt><dd>${fnum(e.drAngularVelocity.z,5)} rad/s</dd>` : ''}` : ''}
+
+        ${appRows.length ? `
+        <dt class="detail-section">Appearance</dt>
+        ${appRows.map(([k,v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join('')}
+        <dt>Raw</dt><dd>0x${(e.appearance>>>0).toString(16).toUpperCase().padStart(8,'0')}</dd>` : ''}
+
+        ${capFlags ? `
+        <dt class="detail-section">Capabilities</dt>
+        <dt>Flags</dt><dd>${capFlags.map(f => escapeHtml(f)).join(', ')}</dd>
+        <dt>Raw</dt><dd>0x${((e.capabilities||0)>>>0).toString(16).toUpperCase().padStart(8,'0')}</dd>` : ''}
+
+        ${e.articulationParams?.length ? `
+        <dt class="detail-section">Articulation (${e.articulationParams.length})</dt>
+        ${e.articulationParams.map((a,i) => `
+          <dt>#${i+1} Designator</dt><dd>${a.typeDesignator === 0 ? 'Articulated' : 'Attached'}</dd>
+          <dt>#${i+1} Param type</dt><dd>0x${(a.parameterType>>>0).toString(16).toUpperCase()}</dd>
+          <dt>#${i+1} Value</dt><dd>${a.parameterValue.toFixed(4)}</dd>`).join('')}` : ''}
+
+        <dt class="detail-section">IDs</dt>
+        <dt>Entity ID</dt><dd>${escapeHtml(e.key||'—')}</dd>
       </dl>`;
+
   } else if (selectedType === 'emitter') {
     const r = data;
+    const ls = r.lastSeen ? new Date(r.lastSeen).toTimeString().slice(0,8) : '—';
     el.innerHTML = `<dl class="detail-list">
-      <dt>Entity</dt><dd>${escapeHtml(r.entity || '—')}</dd>
-      <dt>Emitter</dt><dd>${escapeHtml(r.emitter || '—')}</dd>
-      <dt>Function</dt><dd>${escapeHtml(r['function'] || '—')}</dd>
-      <dt>Band</dt><dd>${escapeHtml(r.band || '—')}</dd>
-      <dt>Freq</dt><dd>${r.freqMHz || '—'} MHz</dd>
-      <dt>PRF</dt><dd>${r.prf || '—'}</dd>
-      <dt>ERP</dt><dd>${r.erp || '—'} dBm</dd>
+      <dt class="detail-section">Emitter System</dt>
+      <dt>Entity</dt><dd>${escapeHtml(r.entity||'—')}</dd>
+      <dt>Emitter name</dt><dd>${escapeHtml(String(r.emitterName ?? r.emitter ?? '—'))}</dd>
+      <dt>Emitter #</dt><dd>${r.emitterNumber ?? '—'}</dd>
+      <dt>Function</dt><dd>${escapeHtml(r.beamFunction||r['function']||'—')}</dd>
+      <dt>State indicator</dt><dd>${r.stateUpdateIndicator === 0 ? 'Heartbeat' : r.stateUpdateIndicator === 1 ? 'Changed data' : '—'}</dd>
+      <dt>Last seen</dt><dd>${ls}</dd>
+      ${r.systemLocation ? `
+      <dt>Sys loc X</dt><dd>${r.systemLocation.x?.toFixed(2)} m</dd>
+      <dt>Sys loc Y</dt><dd>${r.systemLocation.y?.toFixed(2)} m</dd>
+      <dt>Sys loc Z</dt><dd>${r.systemLocation.z?.toFixed(2)} m</dd>` : ''}
+      <dt class="detail-section">Beam ${r.beamNumber ?? ''}</dt>
+      <dt>Band</dt><dd>${escapeHtml(r.band||'—')}</dd>
+      <dt>Frequency</dt><dd>${r.freqMHz||'—'} MHz</dd>
+      <dt>PRF</dt><dd>${r.prf||'—'} Hz</dd>
+      <dt>ERP</dt><dd>${r.erp||'—'} dBm</dd>
+      <dt>Pulse width</dt><dd>${r.pulseWidth||'—'} µs</dd>
+      <dt>Az centre</dt><dd>${r.azimuthCenter ?? '—'} rad</dd>
+      <dt>Az sweep</dt><dd>${r.azimuthSweep ?? '—'} rad</dd>
+      <dt>El centre</dt><dd>${r.elevationCenter ?? '—'} rad</dd>
+      <dt>El sweep</dt><dd>${r.elevationSweep ?? '—'} rad</dd>
+      ${(r.beamFunction||'').toLowerCase().includes('acqui') || r.numTargets > 0 ? `<dt>Targets</dt><dd>${r.numTargets ?? '—'}</dd>` : ''}
+    </dl>`;
+
+  } else if (selectedType === 'fire') {
+    const f = data;
+    const ls = f.ts ? new Date(f.ts).toTimeString().slice(0,8) : '—';
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Fire Event</dt>
+      <dt>Time</dt><dd>${ls}</dd>
+      <dt>Firing entity</dt><dd>${escapeHtml(f.firingKey||'—')}</dd>
+      <dt>Target entity</dt><dd>${escapeHtml(f.targetKey||'—')}</dd>
+      <dt>Munition type</dt><dd>${escapeHtml(f.munitionType||'—')}</dd>
+      <dt>Range</dt><dd>${f.range != null ? fnum(f.range,0)+' m' : '—'}</dd>
+      ${f.geo ? `
+      <dt>Lat</dt><dd>${fnum(f.geo.lat,6)}</dd>
+      <dt>Lon</dt><dd>${fnum(f.geo.lon,6)}</dd>
+      <dt>Alt</dt><dd>${fnum(f.geo.alt,0)} m</dd>` : ''}
+    </dl>`;
+
+  } else if (selectedType === 'detonation') {
+    const d = data;
+    const ls = d.ts ? new Date(d.ts).toTimeString().slice(0,8) : '—';
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Detonation Event</dt>
+      <dt>Time</dt><dd>${ls}</dd>
+      <dt>Firing entity</dt><dd>${escapeHtml(d.firingKey||'—')}</dd>
+      <dt>Target entity</dt><dd>${escapeHtml(d.targetKey||'—')}</dd>
+      <dt>Munition type</dt><dd>${escapeHtml(d.munitionType||'—')}</dd>
+      <dt>Result</dt><dd>${escapeHtml(d.result||'—')}</dd>
+      ${d.geo ? `
+      <dt>Lat</dt><dd>${fnum(d.geo.lat,6)}</dd>
+      <dt>Lon</dt><dd>${fnum(d.geo.lon,6)}</dd>
+      <dt>Alt</dt><dd>${fnum(d.geo.alt,0)} m</dd>` : ''}
+    </dl>`;
+
+  } else if (selectedType === 'transmitter') {
+    const t = data;
+    const ls = t.lastSeen ? new Date(t.lastSeen).toTimeString().slice(0,8) : '—';
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Transmitter</dt>
+      <dt>Entity</dt><dd>${escapeHtml(t.entityKey||'—')}</dd>
+      <dt>Radio ID</dt><dd>${t.radioId}</dd>
+      <dt>Tx State</dt><dd>${escapeHtml(t.txStateName||'—')}</dd>
+      <dt>Frequency</dt><dd>${t.freqMHz} MHz</dd>
+      <dt>Band</dt><dd>${escapeHtml(t.band||'—')}</dd>
+      <dt>Power</dt><dd>${t.power} dBm</dd>
+      ${t.geo ? `
+      <dt>Lat</dt><dd>${fnum(t.geo.lat,6)}</dd>
+      <dt>Lon</dt><dd>${fnum(t.geo.lon,6)}</dd>
+      <dt>Alt</dt><dd>${fnum(t.geo.alt,0)} m</dd>` : ''}
+      <dt>Last seen</dt><dd>${ls}</dd>
+    </dl>`;
+
+  } else if (selectedType === 'signal') {
+    const sg = data;
+    const ls = sg.lastSeen ? new Date(sg.lastSeen).toTimeString().slice(0,8) : '—';
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Signal</dt>
+      <dt>Entity</dt><dd>${escapeHtml(sg.entityIdKey||'—')}</dd>
+      <dt>Radio ID</dt><dd>${sg.radioId}</dd>
+      <dt>Encoding class</dt><dd>${escapeHtml(sg.encodingClassName||'—')}</dd>
+      <dt>Encoding type</dt><dd>${sg.encodingType}</dd>
+      <dt>TDL type</dt><dd>${escapeHtml(sg.tdlTypeName||'—')}</dd>
+      <dt>Sample rate</dt><dd>${sg.sampleRate||0} Hz</dd>
+      <dt>Data length</dt><dd>${sg.dataLengthBits||0} bits</dd>
+      <dt>Samples</dt><dd>${sg.numSamples||0}</dd>
+      <dt>Last seen</dt><dd>${ls}</dd>
     </dl>`;
   }
 }
@@ -679,6 +901,13 @@ function init() {
 
   $('mapTiles').onchange = () => window.MapView.setTiles($('mapTiles').checked, $('mapInfo'));
   $('mapReset').onclick = () => window.MapView.resetView();
+  $('mapExpand').onclick = () => {
+    const main = document.querySelector('main');
+    const expanded = main.classList.toggle('map-expanded');
+    $('mapExpand').textContent = expanded ? '⊡' : '⛶';
+    $('mapExpand').title = expanded ? 'Restore map' : 'Expand map';
+    setTimeout(() => window.MapView.resize(), 50);
+  };
   window.MapView.setTiles(false, $('mapInfo'));
   setRecording(false);
 
@@ -700,8 +929,34 @@ function init() {
     const tr = e.target.closest('tr[data-key]');
     if (!tr) return;
     const key = tr.dataset.key;
-    const emitter = lastStats?.emitters?.find(x => (x.entity + '|' + (x.emitter||'')) === key);
+    const emitter = lastStats?.emitters?.find(x => x._key === key);
     if (emitter) selectItem(key, 'emitter', emitter);
+  });
+  $('firesTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const idx = +tr.dataset.key;
+    const f = lastStats?.fires?.[idx];
+    if (f != null) { selectedKey = `fire_${idx}`; selectedType = 'fire'; renderDetails(f); applyTableSelection(); }
+  });
+  $('detsTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const idx = +tr.dataset.key;
+    const d = lastStats?.detonations?.[idx];
+    if (d != null) { selectedKey = `det_${idx}`; selectedType = 'detonation'; renderDetails(d); applyTableSelection(); }
+  });
+  $('txTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const t = lastStats?.transmitters?.find(x => x._key === tr.dataset.key);
+    if (t) selectItem(tr.dataset.key, 'transmitter', t);
+  });
+  $('sigTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const sg = lastStats?.signals?.find(x => x._key === tr.dataset.key);
+    if (sg) selectItem(tr.dataset.key, 'signal', sg);
   });
   // PDU Monitor tabs
   document.querySelectorAll('.ptab').forEach(t => t.addEventListener('click', () => {

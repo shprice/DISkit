@@ -424,7 +424,13 @@ const MapView = (() => {
     }
   }
 
-  return { init, update, setTiles, resetView, setSelected, setSymbolSize, entityToSidc };
+  function triggerResize() {
+    resize();
+    if (useTiles && leaflet) leaflet.invalidateSize();
+    else draw();
+  }
+
+  return { init, update, setTiles, resetView, setSelected, setSymbolSize, entityToSidc, resize: triggerResize };
 })();
 
 window.MapView = MapView;

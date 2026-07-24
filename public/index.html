@@ -169,6 +169,7 @@
         <h3>Entity map</h3>
         <label class="chk"><input id="mapTiles" type="checkbox" /> Online tiles</label>
         <button id="mapReset" class="mini" title="Reset zoom/pan">Reset view</button>
+        <button id="mapExpand" class="mini" title="Expand map">⛶</button>
         <span id="mapInfo" class="hint"></span>
       </div>
       <div id="mapContainer">
@@ -183,11 +184,14 @@
     </section>
 
     <section class="panel monitor">
+      <h3>PDU Monitor</h3>
       <div class="ptabs">
         <button class="ptab active" data-ptab="entities">Entities</button>
-        <button class="ptab" data-ptab="emitters">Emitters</button>
+        <button class="ptab" data-ptab="emitters">Emissions</button>
         <button class="ptab" data-ptab="fires">Fires</button>
         <button class="ptab" data-ptab="detonations">Dets</button>
+        <button class="ptab" data-ptab="transmitters">Transmitters</button>
+        <button class="ptab" data-ptab="signals">Signals</button>
       </div>
       <div class="ptabbody" id="ptab-entities">
         <div class="tablewrap">
@@ -218,6 +222,22 @@
           <table id="detsTable">
             <thead><tr><th>Time</th><th>Firing</th><th>Target</th><th>Munition</th><th>Result</th></tr></thead>
             <tbody id="detsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-transmitters">
+        <div class="tablewrap">
+          <table id="txTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Radio</th><th>State</th><th>Freq MHz</th><th>Band</th><th>Power dBm</th></tr></thead>
+            <tbody id="txTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-signals">
+        <div class="tablewrap">
+          <table id="sigTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Radio</th><th>Encoding</th><th>TDL</th><th>Rate Hz</th><th>Bits</th></tr></thead>
+            <tbody id="sigTableBody"></tbody>
           </table>
         </div>
       </div>
