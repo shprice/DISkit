@@ -14,6 +14,8 @@ Interactive Simulation) network traffic, with a live browser dashboard.
   Scroll to zoom, drag to pan, double-click to reset.
 - **PCAP export** so logs open in Wireshark.
 
+<img width="948" height="459" alt="image" src="https://github.com/user-attachments/assets/59a9c20a-6dbf-4f8d-8baa-8694df72abee" />
+
 ## Requirements
 
 Node.js 18+ (developed against v24). No native modules.
