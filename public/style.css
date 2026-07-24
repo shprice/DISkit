@@ -172,7 +172,7 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
   color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 500;
 }
 .ptab:hover { color: var(--fg); background: var(--panel2); }
-.ptab.active { color: var(--fg); border-bottom-color: var(--accent); }
+.ptab.active { color: var(--fg); background: var(--panel2); border-bottom-color: var(--accent); }
 .ptabbody { padding-top: 8px; flex: 1; min-height: 0; }
 .ptabbody.hidden { display: none; }
 
@@ -185,6 +185,8 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .detail-list dt { color: var(--muted); font-weight: normal; white-space: nowrap; }
 .detail-list dd { margin: 0; color: var(--fg); word-break: break-word; }
 .detail-section { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 8px 0 4px; font-weight: 500; }
+.enum-type { color: var(--accent); }
+.mil-icon { background: none !important; border: none !important; }
 
 .tablewrap { max-height: 220px; overflow: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 11px; }

@@ -22,6 +22,29 @@ const PIE_COLORS = ['#2f81f7', '#3fb950', '#d29922', '#f85149', '#a371f7', '#39c
 
 const pieHitData = {};
 
+// SISO-STD-010 enumeration lookups, lazily loaded from dis-enums.json
+let disEnums = null;
+fetch('dis-enums.json')
+  .then(r => r.ok ? r.json() : {})
+  .then(d => { disEnums = d; })
+  .catch(() => {});
+
+function lookupEntityType(typeStr) {
+  if (!disEnums || !typeStr) return null;
+  const parts = typeStr.split(/[.\-]/);
+  if (parts.length < 3) return null;
+  const [k, d, c, cat, sub, spec] = parts.map(p => parseInt(p) || 0);
+  const labels = [];
+  if (disEnums.kinds?.[k]) labels.push(disEnums.kinds[k]);
+  if (disEnums.domains?.[`${k}.${d}`]) labels.push(disEnums.domains[`${k}.${d}`]);
+  if (disEnums.countries?.[c]) labels.push(disEnums.countries[c]);
+  const ET = disEnums.et;
+  if (cat && ET?.[`${k}.${d}.${c}.${cat}`]) labels.push(ET[`${k}.${d}.${c}.${cat}`]);
+  if (sub && ET?.[`${k}.${d}.${c}.${cat}.${sub}`]) labels.push(ET[`${k}.${d}.${c}.${cat}.${sub}`]);
+  if (spec && ET?.[`${k}.${d}.${c}.${cat}.${sub}.${spec}`]) labels.push(ET[`${k}.${d}.${c}.${cat}.${sub}.${spec}`]);
+  return labels.length ? labels.join(' / ') : null;
+}
+
 let ws;
 let logs = [];
 let appMode = 'idle';
@@ -319,10 +342,12 @@ function renderDetails(data) {
   if (!data) { el.innerHTML = '<span class="hint">Select an entity or emitter</span>'; return; }
   if (selectedType === 'entity') {
     const e = data;
+    const typeLabel = lookupEntityType(e.type);
     el.innerHTML = `<dl class="detail-list">
       <dt>Marking</dt><dd>${escapeHtml(e.marking || '—')}</dd>
       <dt>Force</dt><dd>${escapeHtml(e.force || '—')}</dd>
-      <dt>Type</dt><dd>${escapeHtml(e.type || e.kind || '—')}</dd>
+      <dt>Type code</dt><dd>${escapeHtml(e.type || '—')}</dd>
+      ${typeLabel ? `<dt>Type</dt><dd class="enum-type">${escapeHtml(typeLabel)}</dd>` : ''}
       <dt>Kind</dt><dd>${escapeHtml(e.kind || '—')}</dd>
       <dt>Domain</dt><dd>${escapeHtml(e.domain || '—')}</dd>
       <dt>Latitude</dt><dd>${fnum(e.lat, 6) || '—'}</dd>

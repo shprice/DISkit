@@ -16,10 +16,58 @@ const MapView = (() => {
   // Offline-canvas view transform (zoom + pan), applied on top of the fit.
   let zoom = 1, panX = 0, panY = 0;
   let dragging = false, lastX = 0, lastY = 0;
+  let mouseDownX = 0, mouseDownY = 0;
 
   let selectedKey = null;
   let onEntityClick = null;
   let animFrame = null;
+
+  // Milsymbol canvas symbol cache: sidc -> { img, ready, size, anchor } | null
+  const symbolCache = new Map();
+
+  // DIS kind.domain → [battleDimension, functionId(6 chars)]
+  // Full 2525C SIDC = S + aff(1) + bd(1) + P + fn(6) + ----* = 15 chars
+  const SIDC_MAP = {
+    '1.1': ['G', 'UCFV--'],  // Platform/Land → armored vehicle
+    '1.2': ['A', 'MFFW--'],  // Platform/Air → fixed wing
+    '1.3': ['S', 'XM----'],  // Platform/Surface → ship
+    '1.4': ['U', 'SS----'],  // Platform/Subsurface → submarine
+    '1.5': ['P', 'V-----'],  // Platform/Space
+    '2.1': ['G', 'WMS---'],  // Munition/Land
+    '2.2': ['A', 'WMA---'],  // Munition/Air
+    '3.1': ['G', 'UCI---'],  // LifeForm/Land → infantry
+    '3.2': ['A', 'MFH---'],  // LifeForm/Air → helicopter
+    '3.3': ['S', 'UCI---'],  // LifeForm/Surface
+  };
+
+  function entityToSidc(entity) {
+    if (!window.ms) return null;
+    const AFF = ['U', 'F', 'H', 'N'];
+    const aff = AFF[entity.forceId] ?? 'U';
+    const parts = (entity.type || '0.0.0.0.0.0.0').split(/[.\-]/);
+    const kind = +parts[0] || 0;
+    const domain = +parts[1] || 0;
+    const [bd, fn] = SIDC_MAP[`${kind}.${domain}`] || ['Z', '------'];
+    return `S${aff}${bd}P${fn}----*`;
+  }
+
+  function getOrCreateSymbol(sidc) {
+    if (!window.ms || !sidc) return null;
+    if (symbolCache.has(sidc)) return symbolCache.get(sidc);
+    try {
+      const sym = new window.ms.Symbol(sidc, { size: 28 });
+      const size = sym.getSize();
+      const anchor = sym.getAnchor();
+      const entry = { img: new Image(), ready: false, size, anchor };
+      entry.img.onload = () => { entry.ready = true; if (!useTiles) draw(); };
+      entry.img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sym.asSVG());
+      symbolCache.set(sidc, entry);
+      return entry;
+    } catch {
+      symbolCache.set(sidc, null);
+      return null;
+    }
+  }
 
   function init(opts = {}) {
     onEntityClick = opts.onEntityClick || null;
@@ -32,6 +80,7 @@ const MapView = (() => {
 
     canvas.addEventListener('click', (e) => {
       if (useTiles) return;
+      if (Math.hypot(e.clientX - mouseDownX, e.clientY - mouseDownY) > 5) return;
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       const b = bounds(lastEntities) || WORLD;
@@ -40,7 +89,7 @@ const MapView = (() => {
         x: (((lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX,
         y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY,
       });
-      let best = null, bestDist = 14;
+      let best = null, bestDist = 22;
       for (const ent of lastEntities) {
         if (!isFinite(ent.lat) || !isFinite(ent.lon)) continue;
         const p = proj(ent.lat, ent.lon);
@@ -57,13 +106,16 @@ const MapView = (() => {
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
       const nz = Math.min(80, Math.max(0.02, zoom * factor));
       const k = nz / zoom;
-      panX = mx - (mx - panX) * k;   // keep the point under the cursor fixed
+      panX = mx - (mx - panX) * k;
       panY = my - (my - panY) * k;
       zoom = nz;
       draw();
     }, { passive: false });
 
-    canvas.addEventListener('mousedown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+    canvas.addEventListener('mousedown', (e) => {
+      dragging = true; lastX = e.clientX; lastY = e.clientY;
+      mouseDownX = e.clientX; mouseDownY = e.clientY;
+    });
     window.addEventListener('mousemove', (e) => {
       if (!dragging) return;
       panX += e.clientX - lastX; panY += e.clientY - lastY;
@@ -88,7 +140,6 @@ const MapView = (() => {
     canvas.width = r.width; canvas.height = r.height;
   }
 
-  // Load the bundled low-resolution world coastline once (offline, no network).
   function loadCoastline() {
     fetch('coastline.json')
       .then((r) => r.json())
@@ -114,10 +165,8 @@ const MapView = (() => {
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
     const hasEntities = lastEntities.some((e) => isFinite(e.lat) && isFinite(e.lon));
-    // Fit to entities when present; otherwise show the whole world.
     const b = bounds(lastEntities) || WORLD;
 
-    // Fit lat/lon to the canvas, then apply the zoom/pan view transform.
     const project = (lat, lon) => ({
       x: (((lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX,
       y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY,
@@ -132,14 +181,14 @@ const MapView = (() => {
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
     }
 
-    // world coastlines (drawn beneath entities)
+    // world coastlines
     if (coastlines) {
       ctx.strokeStyle = 'rgba(90,150,170,0.55)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (const line of coastlines) {
         for (let i = 0; i < line.length; i++) {
-          const p = project(line[i][1], line[i][0]); // stored as [lon, lat]
+          const p = project(line[i][1], line[i][0]);
           if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
         }
       }
@@ -149,20 +198,29 @@ const MapView = (() => {
     for (const e of lastEntities) {
       if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
       const p = project(e.lat, e.lon);
-      if (p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) continue;
+      if (p.x < -40 || p.x > w + 40 || p.y < -40 || p.y > h + 40) continue;
       const col = forceColors[e.forceId] || '#c9a227';
       const hdg = (e.heading || 0) * Math.PI / 180;
-      ctx.save();
-      ctx.translate(p.x, p.y); ctx.rotate(hdg);
-      ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
-      ctx.fill();
-      ctx.restore();
+
+      const sidc = entityToSidc(e);
+      const sym = sidc ? getOrCreateSymbol(sidc) : null;
+
+      if (sym?.ready) {
+        ctx.drawImage(sym.img, p.x - sym.anchor.x, p.y - sym.anchor.y, sym.size.width, sym.size.height);
+      } else {
+        ctx.save();
+        ctx.translate(p.x, p.y); ctx.rotate(hdg);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
       if (e.key === selectedKey) {
         const t = performance.now();
         const pulse = Math.sin(t / 300) * 0.5 + 0.5;
-        const pr = 11 + pulse * 6;
+        const pr = 14 + pulse * 6;
         ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 2 * Math.PI);
         ctx.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.45})`;
         ctx.lineWidth = 2; ctx.stroke();
@@ -173,7 +231,7 @@ const MapView = (() => {
       ctx.fillStyle = '#c7d0da'; ctx.font = '10px system-ui';
       ctx.fillText(e.marking || '', p.x + 8, p.y + 3);
     }
-    // corner coords + zoom indicator + scroll/drag hint
+
     ctx.fillStyle = '#5c6b7a'; ctx.font = '10px ui-monospace, monospace';
     ctx.fillText(`${b.maxLat.toFixed(2)}, ${b.minLon.toFixed(2)}`, 4, 12);
     ctx.fillText(`${b.minLat.toFixed(2)}, ${b.maxLon.toFixed(2)}`, w - 92, h - 6);
@@ -214,6 +272,23 @@ const MapView = (() => {
     else draw();
   }
 
+  function makeMilIcon(entity) {
+    if (!window.ms || !window.L) return null;
+    const sidc = entityToSidc(entity);
+    if (!sidc) return null;
+    try {
+      const sym = new window.ms.Symbol(sidc, { size: 35 });
+      const anchor = sym.getAnchor();
+      const size = sym.getSize();
+      return window.L.divIcon({
+        html: sym.asSVG(),
+        className: 'mil-icon',
+        iconSize: [size.width, size.height],
+        iconAnchor: [anchor.x, anchor.y],
+      });
+    } catch { return null; }
+  }
+
   function updateLeaflet() {
     const seen = new Set();
     for (const e of lastEntities) {
@@ -223,15 +298,36 @@ const MapView = (() => {
       let m = markers.get(e.key);
       const label = e.marking || e.key;
       const isSelected = e.key === selectedKey;
+      const milIcon = makeMilIcon(e);
+
       if (!m) {
-        m = window.L.circleMarker([e.lat, e.lon], { radius: isSelected ? 10 : 6, color: isSelected ? '#ffffff' : col, fillColor: col, fillOpacity: 0.8, weight: isSelected ? 3 : 1 });
+        if (milIcon) {
+          m = window.L.marker([e.lat, e.lon], { icon: milIcon });
+        } else {
+          m = window.L.circleMarker([e.lat, e.lon], { radius: isSelected ? 10 : 6, color: isSelected ? '#ffffff' : col, fillColor: col, fillOpacity: 0.8, weight: isSelected ? 3 : 1 });
+        }
         m.addTo(leaflet); markers.set(e.key, m);
         m.bindTooltip(label, { permanent: false, sticky: true });
         m.on('click', () => { if (onEntityClick) onEntityClick(e.key); });
       } else {
-        m.setLatLng([e.lat, e.lon]); m.setStyle({ color: isSelected ? '#ffffff' : col, fillColor: col, weight: isSelected ? 3 : 1 });
-        m.setRadius(isSelected ? 10 : 6);
-        if (m.getTooltip()?.getContent() !== label) m.setTooltipContent(label);
+        // If milsymbol just became available, switch marker type
+        const isMilMarker = !m.setStyle;
+        if (milIcon && !isMilMarker) {
+          leaflet.removeLayer(m);
+          m = window.L.marker([e.lat, e.lon], { icon: milIcon });
+          m.addTo(leaflet); markers.set(e.key, m);
+          m.bindTooltip(label, { permanent: false, sticky: true });
+          m.on('click', () => { if (onEntityClick) onEntityClick(e.key); });
+        } else {
+          m.setLatLng([e.lat, e.lon]);
+          if (milIcon) {
+            m.setIcon(milIcon);
+          } else if (m.setStyle) {
+            m.setStyle({ color: isSelected ? '#ffffff' : col, fillColor: col, weight: isSelected ? 3 : 1 });
+            m.setRadius(isSelected ? 10 : 6);
+          }
+          if (m.getTooltip()?.getContent() !== label) m.setTooltipContent(label);
+        }
       }
     }
     for (const [k, m] of markers) {
