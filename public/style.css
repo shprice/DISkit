@@ -1,0 +1,179 @@
+:root {
+  --bg: #0e1117;
+  --panel: #161b22;
+  --panel2: #1c2430;
+  --line: #2b3441;
+  --fg: #d7dde5;
+  --muted: #8b97a7;
+  --accent: #2f81f7;
+  --green: #3fb950;
+  --red: #f85149;
+  --amber: #d29922;
+  --friendly: #4aa3ff;
+  --opposing: #ff5b5b;
+  --neutral: #4cd964;
+  --other: #c9a227;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+header h1 { font-size: 18px; margin: 0; letter-spacing: .5px; }
+header .sub { color: var(--muted); }
+.badge {
+  margin-left: auto; padding: 3px 10px; border-radius: 12px; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.badge + .badge { margin-left: 8px; }
+.badge.off { background: #3a2226; color: var(--red); }
+.badge.on { background: #16331c; color: var(--green); }
+.badge.idle { background: #2a2f38; color: var(--muted); }
+.badge.capturing { background: #16331c; color: var(--green); }
+.badge.replaying { background: #1a2b44; color: var(--accent); }
+.badge.rec { background: #3a2226; color: var(--red); animation: recpulse 1.2s ease-in-out infinite; }
+.badge.warn { background: #2e2012; color: var(--amber); }
+@keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+main {
+  display: grid; gap: 12px; padding: 12px;
+  grid-template-columns: 320px 1fr 1fr;
+  grid-template-areas:
+    "control stats    map"
+    "control entities map"
+    "control emitters emitters"
+    "console console  console";
+}
+.panel {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 12px; min-height: 60px;
+}
+.panel h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.control { grid-area: control; }
+.stats { grid-area: stats; }
+.map { grid-area: map; }
+.entities { grid-area: entities; }
+.emitters { grid-area: emitters; }
+.console { grid-area: console; }
+
+.tabs { display: flex; gap: 4px; margin: -4px -4px 0; border-bottom: 1px solid var(--line); }
+.tab {
+  flex: 1; padding: 10px 8px; background: transparent; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--muted); border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 500;
+}
+.tab:hover { color: var(--fg); background: var(--panel2); }
+.tab.active { color: var(--fg); background: var(--panel2); border-bottom-color: var(--accent); }
+.tabbody { padding-top: 12px; }
+.tabbody.hidden { display: none; }
+
+.row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.row .grow { flex: 1; }
+label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; }
+label.chk { flex-direction: row; align-items: center; gap: 6px; }
+input, select {
+  background: var(--bg); border: 1px solid var(--line); color: var(--fg);
+  border-radius: 5px; padding: 6px 8px; font: inherit; min-width: 0;
+}
+input[type=number] { width: 90px; }
+input[type=checkbox] { width: auto; }
+button {
+  background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.rec { background: #3a2226; border-color: var(--red); color: var(--red); }
+button.danger { color: var(--red); }
+button.mini { padding: 3px 8px; font-size: 11px; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:disabled:hover { border-color: var(--line); }
+#mapCanvas { cursor: grab; }
+#mapCanvas:active { cursor: grabbing; }
+fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 10px 0; padding: 8px; }
+legend { color: var(--muted); padding: 0 6px; font-size: 11px; }
+.hint { color: var(--muted); font-size: 11px; }
+
+.filtergrid { display: grid; grid-template-columns: 1fr; gap: 2px; max-height: 180px; overflow: auto;
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--bg); }
+.vfgrid { max-height: 120px; }
+.filtergrid label { flex-direction: row; align-items: center; gap: 6px; font-size: 11px; padding: 1px 0; }
+
+.metrics { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.metric {
+  flex: 1; min-width: 60px; background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px; text-align: center;
+}
+.metric span { display: block; font-size: 20px; font-weight: 600; }
+.metric label { justify-content: center; text-align: center; color: var(--muted); }
+
+.pdurow { display: flex; gap: 14px; align-items: flex-start; }
+#pieChart { flex: 0 0 auto; width: 150px; height: 150px; }
+.chart { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bar { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.bar .name { width: 140px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.bar .track { flex: 1; background: var(--bg); border-radius: 4px; height: 14px; overflow: hidden; }
+.bar .fill { height: 100%; background: var(--accent); border-radius: 4px; }
+.bar .val { width: 56px; text-align: right; }
+
+.maphead { display: flex; align-items: center; gap: 12px; }
+.maphead h3 { margin: 0; }
+#mapContainer { position: relative; width: 100%; height: 320px; margin-top: 8px; }
+#mapCanvas, #leafletMap { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 6px; }
+#mapCanvas { background: #0a1f1a; }
+.hidden { display: none !important; }
+
+.tablewrap { max-height: 220px; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.f1 { background: var(--friendly); } .f2 { background: var(--opposing); }
+.f3 { background: var(--neutral); } .f0 { background: var(--other); }
+
+.feed { height: 180px; overflow: auto; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+.feed div { padding: 1px 0; color: var(--muted); }
+.feed .t1 { color: var(--friendly); }
+.feed .t2, .feed .t3 { color: var(--amber); }
+.feed .t23 { color: var(--green); }
+.loginfo { font-size: 11px; color: var(--muted); margin: 4px 0; }
+.progress { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin: 8px 0 4px; }
+#progBar { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+/* Timeline (recording + replay). The marks layer sits OUTSIDE the clipped
+   track so bookmark tooltips can extend above it without being cut off. */
+.timeline { position: relative; margin: 10px 0 4px; }
+.tl-track {
+  position: relative; height: 16px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 5px; overflow: hidden; cursor: pointer;
+}
+#repTimeline .tl-track { cursor: crosshair; }
+.tl-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); opacity: .35; transition: width .2s; }
+.tl-marks { position: absolute; inset: 0; pointer-events: none; }
+.tl-mark {
+  position: absolute; top: 0; bottom: 0; width: 2px; background: var(--amber);
+  pointer-events: auto; cursor: pointer;
+}
+.tl-mark::after {
+  content: ''; position: absolute; top: -3px; left: -3px; width: 8px; height: 8px;
+  background: var(--amber); border-radius: 50%;
+}
+.tl-mark:hover { background: #ffd966; box-shadow: 0 0 0 1px #ffd966; }
+#repTimeline .tl-mark { background: var(--green); }
+#repTimeline .tl-mark::after { background: var(--green); }
+.tl-mark .tl-tip {
+  display: none; position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--panel2); border: 1px solid var(--line); color: var(--fg);
+  padding: 2px 6px; border-radius: 4px; font-size: 10px; white-space: nowrap; z-index: 20;
+}
+.tl-mark:hover .tl-tip { display: block; }
+
+@media (max-width: 1100px) {
+  main { grid-template-columns: 1fr; grid-template-areas:
+    "control" "stats" "map" "entities" "emitters" "console"; }
+}

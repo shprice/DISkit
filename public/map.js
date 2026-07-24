@@ -1,0 +1,230 @@
+// Entity map with two interchangeable backends:
+//   - offline canvas: auto-fitting lat/lon plot with a grid, no internet needed
+//   - online tiles: Leaflet + OpenStreetMap, loaded lazily from CDN on demand
+// The active backend is toggled by the "Online tiles" checkbox.
+
+const MapView = (() => {
+  let canvas, ctx, leafletEl;
+  let useTiles = false;
+  let leaflet = null;       // Leaflet map instance
+  let markers = new Map();  // key -> Leaflet marker
+  let lastEntities = [];
+  let coastlines = null;    // [ [[lon,lat],...], ... ] low-res world coastline polylines
+  const WORLD = { minLat: -90, maxLat: 90, minLon: -180, maxLon: 180 };
+  const forceColors = { 0: '#c9a227', 1: '#4aa3ff', 2: '#ff5b5b', 3: '#4cd964' };
+
+  // Offline-canvas view transform (zoom + pan), applied on top of the fit.
+  let zoom = 1, panX = 0, panY = 0;
+  let dragging = false, lastX = 0, lastY = 0;
+
+  function init() {
+    canvas = document.getElementById('mapCanvas');
+    leafletEl = document.getElementById('leafletMap');
+    ctx = canvas.getContext('2d');
+    resize();
+    loadCoastline();
+    window.addEventListener('resize', () => { resize(); draw(); });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const nz = Math.min(80, Math.max(0.02, zoom * factor));
+      const k = nz / zoom;
+      panX = mx - (mx - panX) * k;   // keep the point under the cursor fixed
+      panY = my - (my - panY) * k;
+      zoom = nz;
+      draw();
+    }, { passive: false });
+
+    canvas.addEventListener('mousedown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      panX += e.clientX - lastX; panY += e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      draw();
+    });
+    window.addEventListener('mouseup', () => { dragging = false; });
+    canvas.addEventListener('dblclick', () => resetView());
+  }
+
+  function resetView() {
+    if (useTiles && leaflet) {
+      const b = bounds(lastEntities);
+      if (b) leaflet.fitBounds([[b.minLat, b.minLon], [b.maxLat, b.maxLon]]);
+      return;
+    }
+    zoom = 1; panX = 0; panY = 0; draw();
+  }
+
+  function resize() {
+    const r = canvas.parentElement.getBoundingClientRect();
+    canvas.width = r.width; canvas.height = r.height;
+  }
+
+  // Load the bundled low-resolution world coastline once (offline, no network).
+  function loadCoastline() {
+    fetch('coastline.json')
+      .then((r) => r.json())
+      .then((data) => { coastlines = data; draw(); })
+      .catch(() => { coastlines = null; });
+  }
+
+  function bounds(entities) {
+    const pts = entities.filter((e) => isFinite(e.lat) && isFinite(e.lon));
+    if (!pts.length) return null;
+    let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+    for (const e of pts) {
+      minLat = Math.min(minLat, e.lat); maxLat = Math.max(maxLat, e.lat);
+      minLon = Math.min(minLon, e.lon); maxLon = Math.max(maxLon, e.lon);
+    }
+    const padLat = Math.max(0.01, (maxLat - minLat) * 0.15);
+    const padLon = Math.max(0.01, (maxLon - minLon) * 0.15);
+    return { minLat: minLat - padLat, maxLat: maxLat + padLat, minLon: minLon - padLon, maxLon: maxLon + padLon };
+  }
+
+  function draw() {
+    if (useTiles) return;
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const hasEntities = lastEntities.some((e) => isFinite(e.lat) && isFinite(e.lon));
+    // Fit to entities when present; otherwise show the whole world.
+    const b = bounds(lastEntities) || WORLD;
+
+    // Fit lat/lon to the canvas, then apply the zoom/pan view transform.
+    const project = (lat, lon) => ({
+      x: (((lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX,
+      y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY,
+    });
+
+    // grid
+    ctx.strokeStyle = 'rgba(120,160,150,0.12)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 8; i++) {
+      const x = (i / 8) * w, y = (i / 8) * h;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    // world coastlines (drawn beneath entities)
+    if (coastlines) {
+      ctx.strokeStyle = 'rgba(90,150,170,0.55)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const line of coastlines) {
+        for (let i = 0; i < line.length; i++) {
+          const p = project(line[i][1], line[i][0]); // stored as [lon, lat]
+          if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        }
+      }
+      ctx.stroke();
+    }
+
+    for (const e of lastEntities) {
+      if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
+      const p = project(e.lat, e.lon);
+      if (p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) continue;
+      const col = forceColors[e.forceId] || '#c9a227';
+      const hdg = (e.heading || 0) * Math.PI / 180;
+      ctx.save();
+      ctx.translate(p.x, p.y); ctx.rotate(hdg);
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#c7d0da'; ctx.font = '10px system-ui';
+      ctx.fillText(e.marking || '', p.x + 8, p.y + 3);
+    }
+    // corner coords + zoom indicator + scroll/drag hint
+    ctx.fillStyle = '#5c6b7a'; ctx.font = '10px ui-monospace, monospace';
+    ctx.fillText(`${b.maxLat.toFixed(2)}, ${b.minLon.toFixed(2)}`, 4, 12);
+    ctx.fillText(`${b.minLat.toFixed(2)}, ${b.maxLon.toFixed(2)}`, w - 92, h - 6);
+    ctx.fillText(`zoom ${zoom.toFixed(2)}x`, 4, h - 6);
+    if (!hasEntities) {
+      ctx.fillStyle = '#5c6b7a';
+      ctx.fillText('No entity positions yet — showing world coastlines', 4, 26);
+    }
+    if (zoom === 1 && panX === 0 && panY === 0) {
+      ctx.fillStyle = '#465261';
+      ctx.fillText('scroll to zoom · drag to pan · dbl-click to reset', 4, h - 18);
+    }
+  }
+
+  function update(entities) {
+    lastEntities = entities || [];
+    if (useTiles && leaflet) updateLeaflet();
+    else draw();
+  }
+
+  function updateLeaflet() {
+    const seen = new Set();
+    for (const e of lastEntities) {
+      if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
+      seen.add(e.key);
+      const col = forceColors[e.forceId] || '#c9a227';
+      let m = markers.get(e.key);
+      if (!m) {
+        m = window.L.circleMarker([e.lat, e.lon], { radius: 6, color: col, fillColor: col, fillOpacity: 0.8, weight: 1 });
+        m.addTo(leaflet); markers.set(e.key, m);
+      } else {
+        m.setLatLng([e.lat, e.lon]); m.setStyle({ color: col, fillColor: col });
+      }
+      m.bindTooltip(e.marking || e.key, { permanent: false });
+    }
+    for (const [k, m] of markers) {
+      if (!seen.has(k)) { leaflet.removeLayer(m); markers.delete(k); }
+    }
+  }
+
+  function loadLeaflet() {
+    return new Promise((resolve, reject) => {
+      if (window.L) return resolve();
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(css);
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function setTiles(on, infoEl) {
+    useTiles = on;
+    if (on) {
+      try {
+        await loadLeaflet();
+        canvas.classList.add('hidden');
+        leafletEl.classList.remove('hidden');
+        if (!leaflet) {
+          leaflet = window.L.map(leafletEl).setView([51.2, -1.8], 8);
+          window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18, attribution: '© OpenStreetMap',
+          }).addTo(leaflet);
+        }
+        setTimeout(() => leaflet.invalidateSize(), 100);
+        const b = bounds(lastEntities);
+        if (b) leaflet.fitBounds([[b.minLat, b.minLon], [b.maxLat, b.maxLon]]);
+        updateLeaflet();
+        if (infoEl) infoEl.textContent = 'online tiles';
+      } catch {
+        useTiles = false;
+        if (infoEl) infoEl.textContent = 'tiles unavailable — offline view';
+        canvas.classList.remove('hidden'); leafletEl.classList.add('hidden');
+        draw();
+      }
+    } else {
+      leafletEl.classList.add('hidden');
+      canvas.classList.remove('hidden');
+      if (infoEl) infoEl.textContent = 'offline canvas';
+      draw();
+    }
+  }
+
+  return { init, update, setTiles, resetView };
+})();
+
+window.MapView = MapView;

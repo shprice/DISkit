@@ -1,0 +1,7 @@
+node_modules/
+logs/
+*.pcap
+*.dislog
+*.dislog.meta.json
+.claude/
+.remember/

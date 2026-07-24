@@ -1,0 +1,27 @@
+{
+  "name": "dislogger",
+  "version": "1.0.0",
+  "description": "IEEE 1278 DIS traffic logger and replay utility with live web UI",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "sim": "node src/simulator.js"
+  },
+  "keywords": [
+    "DIS",
+    "IEEE1278",
+    "simulation",
+    "logger",
+    "replay",
+    "multicast"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

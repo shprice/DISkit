@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DISLogger — IEEE 1278 DIS Logger / Replay</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>DISLogger</h1>
+    <span class="sub">IEEE 1278 DIS capture &amp; replay</span>
+    <span id="conn" class="badge off">disconnected</span>
+    <span id="modeBadge" class="badge idle">idle</span>
+    <span id="recBadge" class="badge rec hidden">● REC</span>
+  </header>
+
+  <main>
+    <section class="panel control">
+      <div class="tabs">
+        <button class="tab active" data-tab="capture">Capture / Record</button>
+        <button class="tab" data-tab="replay">Replay</button>
+      </div>
+
+      <div class="tabbody" id="tab-capture">
+        <div class="row">
+          <label>Port <input id="capPort" type="number" value="3000" /></label>
+          <label class="chk"><input id="capMulti" type="checkbox" /> Multicast</label>
+          <label class="grow">Group <input id="capGroup" type="text" value="239.1.2.3" disabled /></label>
+        </div>
+        <div class="row">
+          <label class="grow">Bind Address <input id="capBind" type="text" value="0.0.0.0" /></label>
+        </div>
+        <div class="row">
+          <button id="btnListen" class="primary">Start Listening</button>
+          <button id="btnStop">Stop</button>
+        </div>
+        <fieldset>
+          <legend>Recording</legend>
+          <div class="row">
+            <label class="grow">Save location <input id="recDir" type="text" placeholder="logs folder path" /></label>
+            <button id="btnSetRecDir" title="Set as default save location">Set</button>
+          </div>
+          <div class="row">
+            <label class="grow">File <input id="recName" type="text" placeholder="(auto timestamp).dislog" /></label>
+          </div>
+          <div class="row">
+            <span class="hint">Record filter — only ticked PDU types are logged:</span>
+          </div>
+          <div class="row"><label class="chk"><input id="recAll" type="checkbox" checked /> (De)select all</label></div>
+          <div id="recFilter" class="filtergrid"></div>
+          <div class="row"><span class="hint">Version filter — only ticked DIS versions are recorded:</span></div>
+          <div class="row"><label class="chk"><input id="recVerAll" type="checkbox" checked /> (De)select all</label></div>
+          <div id="recVersionFilter" class="filtergrid vfgrid"></div>
+          <div class="row">
+            <button id="btnRecord" class="rec">● Record</button>
+            <button id="btnStopRecord">Stop Recording</button>
+          </div>
+          <div class="row">
+            <label class="grow">Bookmark <input id="bmLabel" type="text" placeholder="label this moment…" /></label>
+            <button id="btnBookmark" title="Add a bookmark at the current recording time">＋ Mark</button>
+          </div>
+          <div class="timeline" id="recTimeline">
+            <div class="tl-track"><div class="tl-fill" id="recTlFill"></div></div>
+            <div class="tl-marks" id="recTlMarks"></div>
+          </div>
+          <div id="recTlTime" class="hint">00:00:00</div>
+        </fieldset>
+      </div>
+
+      <div class="tabbody hidden" id="tab-replay">
+        <div class="row">
+          <label class="grow">Log folder <input id="browseDir" type="text" placeholder="folder path" /></label>
+          <button id="btnOpenDir" title="Open this folder and list its logs">Open</button>
+        </div>
+        <div class="row">
+          <label class="grow">Log
+            <select id="logSelect"></select>
+          </label>
+          <button id="btnRefreshLogs" title="Refresh list">↻</button>
+        </div>
+        <div id="logInfo" class="loginfo"></div>
+        <div class="row">
+          <label>Dest <input id="repDest" type="text" value="127.0.0.1" /></label>
+          <label>Port <input id="repPort" type="number" value="3000" /></label>
+        </div>
+        <div class="row">
+          <label class="chk"><input id="repMulti" type="checkbox" /> Multicast</label>
+          <label class="grow">Group <input id="repGroup" type="text" value="239.1.2.3" disabled /></label>
+        </div>
+        <div class="row">
+          <label>Speed
+            <select id="repSpeed">
+              <option>0.5</option><option selected>1</option><option>2</option>
+              <option>5</option><option>10</option><option>50</option>
+              <option>100</option><option>1000</option>
+            </select>x
+          </label>
+          <label class="chk"><input id="repLoop" type="checkbox" /> Loop</label>
+        </div>
+        <div class="row">
+          <label class="grow">Replay as version
+            <select id="repAsVersion">
+              <option value="">Original (no change)</option>
+              <option value="4">v4 — IEEE 1278-1993</option>
+              <option value="5">v5 — IEEE 1278.1-1995</option>
+              <option value="6">v6 — IEEE 1278.1a-1998</option>
+              <option value="7">v7 — IEEE 1278.1-2012</option>
+            </select>
+          </label>
+          <span id="verWarnBadge" class="badge warn hidden" title="Some PDU types are not defined in the target version">⚠ version warnings</span>
+        </div>
+        <div class="row">
+          <button id="btnPlay" class="primary">▶ Play</button>
+          <button id="btnPause">⏸ Pause</button>
+          <button id="btnStopReplay">⏹ Stop</button>
+        </div>
+        <div class="timeline" id="repTimeline" title="Click to seek; click a bookmark to jump to it">
+          <div class="tl-track"><div class="tl-fill" id="progBar"></div></div>
+          <div class="tl-marks" id="repTlMarks"></div>
+        </div>
+        <div id="progText" class="hint"></div>
+        <fieldset>
+          <legend>Replay type filter — only ticked types are sent</legend>
+          <div class="row"><label class="chk"><input id="repAll" type="checkbox" checked /> (De)select all</label></div>
+          <div id="repFilter" class="filtergrid"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Version filter — only ticked DIS versions are sent</legend>
+          <div class="row"><label class="chk"><input id="repVerAll" type="checkbox" checked /> (De)select all</label></div>
+          <div id="repVersionFilter" class="filtergrid vfgrid"></div>
+        </fieldset>
+        <div class="row">
+          <button id="btnExportPcap">Export selected to PCAP</button>
+          <button id="btnDeleteLog" class="danger">Delete</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel stats">
+      <div class="metrics">
+        <div class="metric"><span id="mPdus">0</span><label>PDUs</label></div>
+        <div class="metric"><span id="mRate">0</span><label>PDU/s</label></div>
+        <div class="metric"><span id="mEntities">0</span><label>Entities</label></div>
+        <div class="metric"><span id="mEmitters">0</span><label>Emitters</label></div>
+        <div class="metric"><span id="mBytes">0</span><label>KB</label></div>
+      </div>
+      <h3>PDU types</h3>
+      <div class="pdurow">
+        <canvas id="pieChart" width="150" height="150"></canvas>
+        <div id="typeChart" class="chart"></div>
+      </div>
+    </section>
+
+    <section class="panel map">
+      <div class="maphead">
+        <h3>Entity map</h3>
+        <label class="chk"><input id="mapTiles" type="checkbox" /> Online tiles</label>
+        <button id="mapReset" class="mini" title="Reset zoom/pan">Reset view</button>
+        <span id="mapInfo" class="hint"></span>
+      </div>
+      <div id="mapContainer">
+        <canvas id="mapCanvas"></canvas>
+        <div id="leafletMap" class="hidden"></div>
+      </div>
+    </section>
+
+    <section class="panel entities">
+      <h3>Entities</h3>
+      <div class="tablewrap">
+        <table id="entityTable">
+          <thead><tr><th>Marking</th><th>Force</th><th>Kind</th><th>Lat</th><th>Lon</th><th>Alt</th><th>Hdg</th><th>Spd</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel emitters">
+      <h3>Emitters</h3>
+      <div class="tablewrap">
+        <table id="emitterTable">
+          <thead><tr><th>Entity</th><th>Emitter</th><th>Function</th><th>Band</th><th>Freq MHz</th><th>PRF</th><th>ERP</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel console">
+      <h3>Console</h3>
+      <div id="feed" class="feed"></div>
+    </section>
+  </main>
+
+  <script src="map.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
