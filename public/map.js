@@ -17,13 +17,38 @@ const MapView = (() => {
   let zoom = 1, panX = 0, panY = 0;
   let dragging = false, lastX = 0, lastY = 0;
 
-  function init() {
+  let selectedKey = null;
+  let onEntityClick = null;
+  let animFrame = null;
+
+  function init(opts = {}) {
+    onEntityClick = opts.onEntityClick || null;
     canvas = document.getElementById('mapCanvas');
     leafletEl = document.getElementById('leafletMap');
     ctx = canvas.getContext('2d');
     resize();
     loadCoastline();
     window.addEventListener('resize', () => { resize(); draw(); });
+
+    canvas.addEventListener('click', (e) => {
+      if (useTiles) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const b = bounds(lastEntities) || WORLD;
+      const w = canvas.width, h = canvas.height;
+      const proj = (lat, lon) => ({
+        x: (((lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX,
+        y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY,
+      });
+      let best = null, bestDist = 14;
+      for (const ent of lastEntities) {
+        if (!isFinite(ent.lat) || !isFinite(ent.lon)) continue;
+        const p = proj(ent.lat, ent.lon);
+        const d = Math.hypot(p.x - mx, p.y - my);
+        if (d < bestDist) { bestDist = d; best = ent; }
+      }
+      if (best && onEntityClick) onEntityClick(best.key);
+    });
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -134,6 +159,17 @@ const MapView = (() => {
       ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
       ctx.fill();
       ctx.restore();
+      if (e.key === selectedKey) {
+        const t = performance.now();
+        const pulse = Math.sin(t / 300) * 0.5 + 0.5;
+        const pr = 11 + pulse * 6;
+        ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 2 * Math.PI);
+        ctx.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.45})`;
+        ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x, p.y, pr + 5, 0, 2 * Math.PI);
+        ctx.strokeStyle = `rgba(47,129,247,${0.25 + pulse * 0.35})`;
+        ctx.lineWidth = 1.5; ctx.stroke();
+      }
       ctx.fillStyle = '#c7d0da'; ctx.font = '10px system-ui';
       ctx.fillText(e.marking || '', p.x + 8, p.y + 3);
     }
@@ -152,6 +188,26 @@ const MapView = (() => {
     }
   }
 
+  function setSelected(key) {
+    selectedKey = key;
+    if (useTiles) {
+      updateLeaflet();
+    } else {
+      if (key && !animFrame) startSelectionAnim();
+      else if (!key && animFrame) { cancelAnimationFrame(animFrame); animFrame = null; draw(); }
+      else draw();
+    }
+  }
+
+  function startSelectionAnim() {
+    function tick() {
+      if (!selectedKey || useTiles) { animFrame = null; return; }
+      draw();
+      animFrame = requestAnimationFrame(tick);
+    }
+    animFrame = requestAnimationFrame(tick);
+  }
+
   function update(entities) {
     lastEntities = entities || [];
     if (useTiles && leaflet) updateLeaflet();
@@ -166,12 +222,15 @@ const MapView = (() => {
       const col = forceColors[e.forceId] || '#c9a227';
       let m = markers.get(e.key);
       const label = e.marking || e.key;
+      const isSelected = e.key === selectedKey;
       if (!m) {
-        m = window.L.circleMarker([e.lat, e.lon], { radius: 6, color: col, fillColor: col, fillOpacity: 0.8, weight: 1 });
+        m = window.L.circleMarker([e.lat, e.lon], { radius: isSelected ? 10 : 6, color: isSelected ? '#ffffff' : col, fillColor: col, fillOpacity: 0.8, weight: isSelected ? 3 : 1 });
         m.addTo(leaflet); markers.set(e.key, m);
         m.bindTooltip(label, { permanent: false, sticky: true });
+        m.on('click', () => { if (onEntityClick) onEntityClick(e.key); });
       } else {
-        m.setLatLng([e.lat, e.lon]); m.setStyle({ color: col, fillColor: col });
+        m.setLatLng([e.lat, e.lon]); m.setStyle({ color: isSelected ? '#ffffff' : col, fillColor: col, weight: isSelected ? 3 : 1 });
+        m.setRadius(isSelected ? 10 : 6);
         if (m.getTooltip()?.getContent() !== label) m.setTooltipContent(label);
       }
     }
@@ -226,7 +285,7 @@ const MapView = (() => {
     }
   }
 
-  return { init, update, setTiles, resetView };
+  return { init, update, setTiles, resetView, setSelected };
 })();
 
 window.MapView = MapView;

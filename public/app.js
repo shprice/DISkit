@@ -29,6 +29,9 @@ let pendingSeek = null;       // offsetMicros to seek to once replay starts
 let playerState = 'idle';     // last reported replay state (playing|paused|stopped)
 let replayBookmarks = [];     // bookmarks of the loaded/selected replay log
 let replayDurationMs = 0;     // duration of the selected replay log
+let selectedKey = null;
+let selectedType = null;      // 'entity' | 'emitter'
+let lastStats = null;
 
 function $(id) { return document.getElementById(id); }
 
@@ -140,31 +143,40 @@ function applyConfig(c) {
 
 function setMode(mode) {
   appMode = mode;
-  const b = $('modeBadge');
-  b.textContent = mode; b.className = 'badge ' + mode;
+  const badge = $('modeBadge');
+  const wasReplayingBadge = badge.classList.contains('replaying');
+  badge.className = 'badge ' + mode;
+  if (mode === 'replaying') {
+    if (!wasReplayingBadge) badge.innerHTML = '<span class="spinner"></span>replaying';
+  } else {
+    badge.textContent = mode;
+  }
   if (mode !== 'replaying') { playerState = 'idle'; $('btnPause').textContent = '⏸ Pause'; }
   const listening = mode === 'capturing';
   $('btnListen').textContent = listening ? '◉ Listening…' : 'Start Listening';
   $('btnListen').className   = listening ? 'active' : 'primary';
+  const btnPlay = $('btnPlay');
+  const wasReplaying = btnPlay.classList.contains('active');
   if (mode === 'replaying') {
-    $('btnPlay').innerHTML   = '<span class="spinner"></span>Playing…';
-    $('btnPlay').className   = 'active';
+    btnPlay.className = 'active';
+    if (!wasReplaying) btnPlay.innerHTML = '<span class="spinner"></span>Playing…';
   } else {
-    $('btnPlay').textContent = '▶ Play';
-    $('btnPlay').className   = 'primary';
+    btnPlay.textContent = '▶ Play';
+    btnPlay.className = 'primary';
   }
 }
 
 function setRecording(on, startMs, bytes) {
   const badge = $('recBadge');
   badge.classList.toggle('hidden', !on);
-  if (on) badge.textContent = `● REC ${hms(Date.now() - (startMs || Date.now()))} · ${fmtBytes(bytes)}`;
+  if (on) $('recText').textContent = `REC ${hms(Date.now() - (startMs || Date.now()))} · ${fmtBytes(bytes)}`;
   const btn = $('btnRecord');
+  const wasRec = btn.classList.contains('is-recording');
   btn.disabled = !!on;
   btn.classList.toggle('is-recording', !!on);
-  if (on) {
-    btn.innerHTML  = '<span class="rec-dot"></span>Recording…';
-  } else {
+  if (on && !wasRec) {
+    btn.innerHTML = '<span class="rec-dot"></span>Recording…';
+  } else if (!on) {
     btn.textContent = '● Record';
   }
   $('btnStopRecord').disabled = !on;
@@ -250,29 +262,92 @@ function renderStats(s) {
   $('mBytes').textContent = fmtBytes(s.totalBytes);
 
   drawPie('pieChart', (s.types || []).map(t => ({ count: t.count, label: unCamel(t.name) })), 'PDUs');
-  drawPie('sitePie',  (s.sites || []).map(x => ({ count: x.count, label: `Site ${x.id}` })), 'Sites');
-  drawPie('appPie',   (s.apps  || []).map(x => ({ count: x.count, label: `App ${x.id}` })), 'Apps');
+  drawPie('sitePie', (s.sites || []).map(x => ({ count: x.count, label: `Site ${x.id}` })), 'Sites', (s.sites||[]).length);
+  drawPie('appPie',  (s.apps  || []).map(x => ({ count: x.count, label: `App ${x.id}` })), 'Apps', (s.apps||[]).length);
 
   const eb = $('entityTable').querySelector('tbody');
   eb.innerHTML = s.entities.map((e) => `
-    <tr>
-      <td><span class="dot f${e.forceId}"></span>${e.marking || ''}</td>
-      <td>${e.force || ''}</td><td>${e.kind || ''}</td>
+    <tr data-key="${escapeHtml(e.key)}">
+      <td><span class="dot f${e.forceId}"></span>${escapeHtml(e.marking) || ''}</td>
+      <td>${escapeHtml(e.force) || ''}</td><td>${escapeHtml(e.kind) || ''}</td>
       <td>${fnum(e.lat, 4)}</td><td>${fnum(e.lon, 4)}</td>
       <td>${fnum(e.alt, 0)}</td><td>${fnum(e.heading, 0)}</td><td>${fnum(e.speed, 0)}</td>
     </tr>`).join('');
 
   const mb = $('emitterTable').querySelector('tbody');
   mb.innerHTML = s.emitters.map((r) => `
-    <tr><td>${r.entity}</td><td>${r.emitter}</td><td>${r.function}</td>
-    <td>${r.band}</td><td>${r.freqMHz}</td><td>${r.prf}</td><td>${r.erp}</td></tr>`).join('');
+    <tr data-key="${escapeHtml(r.entity + '|' + (r.emitter || ''))}">
+      <td>${escapeHtml(r.entity)}</td><td>${escapeHtml(r.emitter || '')}</td>
+      <td>${escapeHtml(r['function'] || '')}</td>
+      <td>${escapeHtml(r.band || '')}</td><td>${r.freqMHz}</td><td>${r.prf}</td><td>${r.erp}</td>
+    </tr>`).join('');
+
+  // Persist selection highlight across re-renders; refresh details if data changed
+  lastStats = s;
+  if (selectedKey) {
+    const ent = selectedType === 'entity' ? s.entities?.find(x => x.key === selectedKey) : null;
+    const emit = selectedType === 'emitter' ? s.emitters?.find(x => (x.entity + '|' + (x.emitter||'')) === selectedKey) : null;
+    const fresh = ent || emit;
+    if (fresh) renderDetails(fresh);
+    else { selectedKey = null; selectedType = null; renderDetails(null); }
+  }
+  applyTableSelection();
 
   window.MapView.update(s.entities);
 }
 function fnum(v, d) { return (v === undefined || v === null || !isFinite(v)) ? '' : Number(v).toFixed(d); }
 
+function selectItem(key, type, data) {
+  selectedKey = key;
+  selectedType = type;
+  renderDetails(data);
+  applyTableSelection();
+  window.MapView.setSelected(type === 'entity' ? key : null);
+}
+
+function applyTableSelection() {
+  document.querySelectorAll('#entityTable tbody tr').forEach(r =>
+    r.classList.toggle('selected', selectedType === 'entity' && r.dataset.key === selectedKey)
+  );
+  document.querySelectorAll('#emitterTable tbody tr').forEach(r =>
+    r.classList.toggle('selected', selectedType === 'emitter' && r.dataset.key === selectedKey)
+  );
+}
+
+function renderDetails(data) {
+  const el = $('detailsContent');
+  if (!data) { el.innerHTML = '<span class="hint">Select an entity or emitter</span>'; return; }
+  if (selectedType === 'entity') {
+    const e = data;
+    el.innerHTML = `<dl class="detail-list">
+      <dt>Marking</dt><dd>${escapeHtml(e.marking || '—')}</dd>
+      <dt>Force</dt><dd>${escapeHtml(e.force || '—')}</dd>
+      <dt>Type</dt><dd>${escapeHtml(e.type || e.kind || '—')}</dd>
+      <dt>Kind</dt><dd>${escapeHtml(e.kind || '—')}</dd>
+      <dt>Domain</dt><dd>${escapeHtml(e.domain || '—')}</dd>
+      <dt>Latitude</dt><dd>${fnum(e.lat, 6) || '—'}</dd>
+      <dt>Longitude</dt><dd>${fnum(e.lon, 6) || '—'}</dd>
+      <dt>Altitude</dt><dd>${fnum(e.alt, 0) !== '' ? fnum(e.alt, 0) + ' m' : '—'}</dd>
+      <dt>Heading</dt><dd>${fnum(e.heading, 1) !== '' ? fnum(e.heading, 1) + '\xB0' : '—'}</dd>
+      <dt>Speed</dt><dd>${fnum(e.speed, 1) !== '' ? fnum(e.speed, 1) + ' m/s' : '—'}</dd>
+      <dt>ID</dt><dd>${escapeHtml(e.key || '—')}</dd>
+    </dl>`;
+  } else if (selectedType === 'emitter') {
+    const r = data;
+    el.innerHTML = `<dl class="detail-list">
+      <dt>Entity</dt><dd>${escapeHtml(r.entity || '—')}</dd>
+      <dt>Emitter</dt><dd>${escapeHtml(r.emitter || '—')}</dd>
+      <dt>Function</dt><dd>${escapeHtml(r['function'] || '—')}</dd>
+      <dt>Band</dt><dd>${escapeHtml(r.band || '—')}</dd>
+      <dt>Freq</dt><dd>${r.freqMHz || '—'} MHz</dd>
+      <dt>PRF</dt><dd>${r.prf || '—'}</dd>
+      <dt>ERP</dt><dd>${r.erp || '—'} dBm</dd>
+    </dl>`;
+  }
+}
+
 // Donut/pie chart. data items: { count, label }. Stores segments for hover hit-testing.
-function drawPie(canvasId, data, centerLabel) {
+function drawPie(canvasId, data, centerLabel, centerCount) {
   const c = $(canvasId);
   if (!c) return;
   const ctx = c.getContext('2d');
@@ -300,7 +375,8 @@ function drawPie(canvasId, data, centerLabel) {
   ctx.fillStyle = '#161b22'; ctx.fill();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillStyle = '#d7dde5'; ctx.font = `bold ${ir > 20 ? 12 : 10}px system-ui`;
-  ctx.fillText(fmt(total), cx, centerLabel ? cy - 4 : cy);
+  const displayTotal = centerCount !== undefined ? centerCount : total;
+  ctx.fillText(fmt(displayTotal), cx, centerLabel ? cy - 4 : cy);
   if (centerLabel) { ctx.fillStyle = '#8b97a7'; ctx.font = '9px system-ui'; ctx.fillText(centerLabel, cx, cy + 8); }
   ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
 }
@@ -436,7 +512,18 @@ function doPlay() {
 
 // ---- wiring ----------------------------------------------------------------
 function init() {
-  window.MapView.init();
+  window.MapView.init({
+    onEntityClick: (key) => {
+      const entity = lastStats?.entities?.find(x => x.key === key);
+      if (entity) {
+        selectItem(key, 'entity', entity);
+        // Switch to entities tab in monitor
+        document.querySelectorAll('.ptab').forEach(t => t.classList.toggle('active', t.dataset.ptab === 'entities'));
+        $('ptab-entities').classList.remove('hidden');
+        $('ptab-emitters').classList.add('hidden');
+      }
+    }
+  });
   buildMultiselect($('recFilter'),        PDU_TYPES,    'All PDU types');
   buildMultiselect($('repFilter'),        PDU_TYPES,    'All PDU types');
   buildMultiselect($('recVersionFilter'), DIS_VERSIONS, 'All versions', (v, n) => `v${v} — ${n}`);
@@ -514,6 +601,28 @@ function init() {
     const open = $('consoleDrawer').classList.toggle('open');
     $('consoleChevron').textContent = open ? '▼' : '▲';
   });
+
+  $('entityTable').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const key = tr.dataset.key;
+    const entity = lastStats?.entities?.find(x => x.key === key);
+    if (entity) selectItem(key, 'entity', entity);
+  });
+  $('emitterTable').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const key = tr.dataset.key;
+    const emitter = lastStats?.emitters?.find(x => (x.entity + '|' + (x.emitter||'')) === key);
+    if (emitter) selectItem(key, 'emitter', emitter);
+  });
+  // PDU Monitor tabs
+  document.querySelectorAll('.ptab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.ptab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    $('ptab-entities').classList.toggle('hidden', t.dataset.ptab !== 'entities');
+    $('ptab-emitters').classList.toggle('hidden', t.dataset.ptab !== 'emitters');
+  }));
 
   connect();
 }

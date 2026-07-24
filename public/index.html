@@ -12,7 +12,7 @@
     <span class="sub">IEEE 1278 DIS Toolkit</span>
     <span id="conn" class="badge off">disconnected</span>
     <span id="modeBadge" class="badge idle">idle</span>
-    <span id="recBadge" class="badge rec hidden">● REC</span>
+    <span id="recBadge" class="badge rec hidden"><span class="rec-dot" id="recDotHeader"></span><span id="recText">REC</span></span>
   </header>
 
   <main>
@@ -176,23 +176,33 @@
       </div>
     </section>
 
-    <section class="panel entities">
-      <h3>Entities</h3>
-      <div class="tablewrap">
-        <table id="entityTable">
-          <thead><tr><th>Marking</th><th>Force</th><th>Kind</th><th>Lat</th><th>Lon</th><th>Alt</th><th>Hdg</th><th>Spd</th></tr></thead>
-          <tbody></tbody>
-        </table>
+    <section class="panel monitor">
+      <div class="ptabs">
+        <button class="ptab active" data-ptab="entities">Entities</button>
+        <button class="ptab" data-ptab="emitters">Emitters</button>
+      </div>
+      <div class="ptabbody" id="ptab-entities">
+        <div class="tablewrap">
+          <table id="entityTable" class="sel-table">
+            <thead><tr><th>Marking</th><th>Force</th><th>Kind</th><th>Lat</th><th>Lon</th><th>Alt</th><th>Hdg</th><th>Spd</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-emitters">
+        <div class="tablewrap">
+          <table id="emitterTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Emitter</th><th>Function</th><th>Band</th><th>Freq MHz</th><th>PRF</th><th>ERP</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
-    <section class="panel emitters">
-      <h3>Emitters</h3>
-      <div class="tablewrap">
-        <table id="emitterTable">
-          <thead><tr><th>Entity</th><th>Emitter</th><th>Function</th><th>Band</th><th>Freq MHz</th><th>PRF</th><th>ERP</th></tr></thead>
-          <tbody></tbody>
-        </table>
+    <section class="panel details">
+      <h3>Details</h3>
+      <div id="detailsContent" class="details-wrap">
+        <span class="hint">Select an entity or emitter</span>
       </div>
     </section>
 
@@ -200,6 +210,7 @@
 
   <div class="console-drawer" id="consoleDrawer">
     <div class="console-tab" id="consoleTab">
+      <span class="console-expand">⤢</span>
       <span class="console-title">Console</span>
       <span class="console-chevron" id="consoleChevron">▲</span>
     </div>
