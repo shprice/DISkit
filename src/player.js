@@ -39,6 +39,11 @@ export class Player {
     this._lastSample = 0;
   }
 
+  currentOffsetMicros() {
+    if (this.state === 'idle') return 0;
+    return Math.min(this._scaledElapsedMicros() + (this.baseOffsetMicros || 0), this.totalMicros || Infinity);
+  }
+
   load(logPath) {
     this.stop();
     this.logPath = logPath;

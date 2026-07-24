@@ -22,6 +22,9 @@
 // read transparently — the reader detects the format from magic bytes.
 
 import fs from 'fs';
+import os from 'os';
+import crypto from 'crypto';
+import pathModule from 'path';
 import AdmZip from 'adm-zip';
 
 const MAGIC = 'DISLOG01';
@@ -97,6 +100,26 @@ export function writeMeta(path, meta) {
   fs.writeFileSync(`${path}.meta.json`, JSON.stringify(meta, null, 2));
 }
 
+export function updateMeta(logPath, updateFn) {
+  try {
+    if (isZip(logPath)) {
+      const zip = new AdmZip(logPath);
+      const entry = zip.getEntry('meta.json');
+      let metaObj = entry ? JSON.parse(entry.getData().toString('utf8')) : {};
+      metaObj = updateFn(metaObj) || metaObj;
+      zip.addFile('meta.json', Buffer.from(JSON.stringify(metaObj, null, 2)));
+      zip.writeZip(logPath);
+      return metaObj;
+    }
+    const sidecar = `${logPath}.meta.json`;
+    let metaObj = {};
+    try { metaObj = JSON.parse(fs.readFileSync(sidecar, 'utf8')); } catch {}
+    metaObj = updateFn(metaObj) || metaObj;
+    fs.writeFileSync(sidecar, JSON.stringify(metaObj, null, 2));
+    return metaObj;
+  } catch { return null; }
+}
+
 // --- Read --------------------------------------------------------------------
 
 export function readMeta(path) {
@@ -115,16 +138,17 @@ export function readMeta(path) {
 // For ZIP files a temporary extraction is used so the existing seek-based read
 // logic works unchanged; the temp file is cleaned up on close().
 export class LogReader {
-  constructor(path) {
-    this.path = path;
+  constructor(filePath) {
+    this.path = filePath;
     this.tmpPath = null;
 
-    let binPath = path;
-    if (isZip(path)) {
-      const zip = new AdmZip(path);
+    let binPath = filePath;
+    if (isZip(filePath)) {
+      const zip = new AdmZip(filePath);
       const entry = zip.getEntry('capture.bin');
       if (!entry) throw new Error('Not a valid DISLOG container (missing capture.bin)');
-      this.tmpPath = path + '.~r';
+      const tmpName = `dislog-${crypto.randomBytes(6).toString('hex')}.tmp`;
+      this.tmpPath = pathModule.join(os.tmpdir(), tmpName);
       fs.writeFileSync(this.tmpPath, entry.getData());
       binPath = this.tmpPath;
     }

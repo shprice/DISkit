@@ -66,10 +66,13 @@ let lastStats = null;
 function $(id) { return document.getElementById(id); }
 
 function connect() {
+  if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
   ws = new WebSocket(`ws://${location.host}`);
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); setTimeout(connect, 1500); };
-  ws.onmessage = (ev) => handle(JSON.parse(ev.data));
+  ws.onmessage = (ev) => {
+    try { handle(JSON.parse(ev.data)); } catch (err) { console.error('WS error:', err); }
+  };
 }
 function setConn(on) {
   const b = $('conn');
@@ -141,7 +144,14 @@ function handle(m) {
       if (m.message) toast(m.message); break;
     case 'progress': renderProgress(m.progress); break;
     case 'bookmarkAdded':
-      toast(`Bookmarked: ${m.bookmark?.label || ''}`); $('bmLabel').value = ''; break;
+      toast(`Bookmarked: ${m.bookmark?.label || ''}`);
+      $('bmLabel').value = '';
+      if ($('repBmLabel')) $('repBmLabel').value = '';
+      if (m.bookmarks) {
+        replayBookmarks = m.bookmarks;
+        renderReplayMarks();
+      }
+      break;
     case 'dirs':
       if (m.recordDir) $('recDir').value = m.recordDir;
       if (m.browseDir) $('browseDir').value = m.browseDir;
@@ -150,7 +160,10 @@ function handle(m) {
       logs = m.logs || []; if (m.browseDir) $('browseDir').value = m.browseDir; renderLogs(); break;
     case 'recordingStopped':
       toast(`Saved ${m.result?.records || 0} records`); send({ cmd: 'listLogs' }); break;
-    case 'replayEnded': toast(`Replay finished (${m.sentCount} PDUs, ${m.loops} loops)`); break;
+    case 'replayEnded':
+      setMode('idle');
+      toast(`Replay finished (${m.sentCount} PDUs, ${m.loops} loops)`);
+      break;
     case 'pcapExported': toast(`Exported ${m.file} (${m.packets} packets)`); send({ cmd: 'listLogs' }); break;
     case 'versionWarning': {
       const badge = $('verWarnBadge');
@@ -182,13 +195,20 @@ function setMode(mode) {
   } else {
     badge.textContent = mode;
   }
-  if (mode !== 'replaying') { playerState = 'idle'; $('btnPause').textContent = '⏸ Pause'; }
+  if (mode !== 'replaying') {
+    playerState = 'idle';
+    $('btnPause').textContent = '⏸ Pause';
+    if ($('progBar')) $('progBar').style.width = '0%';
+    if ($('progText')) $('progText').textContent = '';
+  }
   if (prevMode === 'replaying' && mode === 'idle') {
     window.MapView?.update([]);
     selectedKey = null; selectedType = null;
     window.MapView?.setSelected(null);
     const dc = $('detailsContent');
     if (dc) dc.innerHTML = '<span class="hint">Select an entity or emitter</span>';
+    if ($('progBar')) $('progBar').style.width = '0%';
+    if ($('progText')) $('progText').textContent = '';
   }
   const listening = mode === 'capturing';
   $('btnListen').textContent = listening ? '◉ Listening…' : 'Start Listening';
@@ -527,7 +547,7 @@ function renderDetails(data) {
         ${appRows.map(([k,v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join('')}
         <dt>Raw</dt><dd>0x${(e.appearance>>>0).toString(16).toUpperCase().padStart(8,'0')}</dd>` : ''}
 
-        ${capFlags ? `
+        ${capFlags && capFlags.length ? `
         <dt class="detail-section">Capabilities</dt>
         <dt>Flags</dt><dd>${capFlags.map(f => escapeHtml(f)).join(', ')}</dd>
         <dt>Raw</dt><dd>0x${((e.capabilities||0)>>>0).toString(16).toUpperCase().padStart(8,'0')}</dd>` : ''}
@@ -537,7 +557,7 @@ function renderDetails(data) {
         ${e.articulationParams.map((a,i) => `
           <dt>#${i+1} Designator</dt><dd>${a.typeDesignator === 0 ? 'Articulated' : 'Attached'}</dd>
           <dt>#${i+1} Param type</dt><dd>0x${(a.parameterType>>>0).toString(16).toUpperCase()}</dd>
-          <dt>#${i+1} Value</dt><dd>${a.parameterValue.toFixed(4)}</dd>`).join('')}` : ''}
+          <dt>#${i+1} Value</dt><dd>${isFinite(a.parameterValue) ? a.parameterValue.toFixed(4) : '—'}</dd>`).join('')}` : ''}
 
         <dt class="detail-section">IDs</dt>
         <dt>Entity ID</dt><dd>${escapeHtml(e.key||'—')}</dd>
@@ -555,9 +575,9 @@ function renderDetails(data) {
       <dt>State indicator</dt><dd>${r.stateUpdateIndicator === 0 ? 'Heartbeat' : r.stateUpdateIndicator === 1 ? 'Changed data' : '—'}</dd>
       <dt>Last seen</dt><dd>${ls}</dd>
       ${r.systemLocation ? `
-      <dt>Sys loc X</dt><dd>${r.systemLocation.x?.toFixed(2)} m</dd>
-      <dt>Sys loc Y</dt><dd>${r.systemLocation.y?.toFixed(2)} m</dd>
-      <dt>Sys loc Z</dt><dd>${r.systemLocation.z?.toFixed(2)} m</dd>` : ''}
+      <dt>Sys loc X</dt><dd>${isFinite(r.systemLocation.x) ? r.systemLocation.x.toFixed(2) : '—'} m</dd>
+      <dt>Sys loc Y</dt><dd>${isFinite(r.systemLocation.y) ? r.systemLocation.y.toFixed(2) : '—'} m</dd>
+      <dt>Sys loc Z</dt><dd>${isFinite(r.systemLocation.z) ? r.systemLocation.z.toFixed(2) : '—'} m</dd>` : ''}
       <dt class="detail-section">Beam ${r.beamNumber ?? ''}</dt>
       <dt>Band</dt><dd>${escapeHtml(r.band||'—')}</dd>
       <dt>Frequency</dt><dd>${r.freqMHz||'—'} MHz</dd>
@@ -723,7 +743,7 @@ let feedLines = [];
 function renderFeed(samples) {
   if (!samples || !samples.length) return;
   for (const s of samples) {
-    feedLines.push(`<div class="t${s.type}">${ts()} ${s.name}${s.key ? ' ' + s.key : ''}</div>`);
+    feedLines.push(`<div class="t${s.type}">${ts()} ${escapeHtml(s.name)}${s.key ? ' ' + escapeHtml(s.key) : ''}</div>`);
     if (s.type === 2) flashEvent('FIRE', 'fire');
     else if (s.type === 3) flashEvent('DETONATION', 'detonation');
   }
@@ -752,7 +772,7 @@ function flashEvent(text, cls) {
 function renderLogs() {
   const sel = $('logSelect');
   const prev = sel.value;
-  sel.innerHTML = logs.map((l) => `<option value="${l.file}">${l.file}</option>`).join('');
+  sel.innerHTML = logs.map((l) => `<option value="${escapeHtml(l.file)}">${escapeHtml(l.file)}</option>`).join('');
   if (prev && logs.some((l) => l.file === prev)) sel.value = prev;
   showLogInfo();
 }
@@ -866,6 +886,13 @@ function init() {
   $('logSelect').onchange = showLogInfo;
   $('btnPlay').onclick = () => doPlay();
   $('btnBookmark').onclick = () => send({ cmd: 'addBookmark', label: $('bmLabel').value });
+  const addRepBm = () => {
+    const label = $('repBmLabel')?.value || '';
+    const selectedFile = $('logSelect')?.value;
+    send({ cmd: 'addBookmark', label, file: selectedFile });
+  };
+  if ($('btnRepBookmark')) $('btnRepBookmark').onclick = addRepBm;
+  if ($('repBmLabel')) $('repBmLabel').onkeydown = (e) => { if (e.key === 'Enter') addRepBm(); };
   // Click anywhere on the replay timeline to seek; marks handle their own clicks.
   $('repTimeline').onclick = (e) => {
     if (!replayDurationMs) return;
@@ -884,8 +911,6 @@ function init() {
   $('repSiteIds').addEventListener('input', () => sendFiltersIfReplaying());
   $('repAppIds').addEventListener('input', () => sendFiltersIfReplaying());
   $('btnExportPcap').onclick = () => $('logSelect').value && send({ cmd: 'exportPcap', file: $('logSelect').value });
-  $('btnDeleteLog').onclick = () => $('logSelect').value &&
-    confirm('Delete ' + $('logSelect').value + '?') && send({ cmd: 'deleteLog', file: $('logSelect').value });
 
   // Multicast group inputs are only relevant when the multicast box is ticked.
   const bindMulti = (chk, grp) => {

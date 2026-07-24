@@ -6,6 +6,7 @@ const to = setTimeout(() => { console.error('FAIL timeout'); process.exit(1); },
 let file = null, phase = 'record', seekTarget = 0, seekSent = false;
 
 ws.on('open', () => {
+  ws.send(JSON.stringify({ cmd: 'setRecordDir', dir: 'logs' }));
   ws.send(JSON.stringify({ cmd: 'startRecording', port: 3000, multicast: false, bindAddress: '0.0.0.0' }));
   setTimeout(() => ws.send(JSON.stringify({ cmd: 'addBookmark', label: 'midpoint' })), 700);
   setTimeout(() => ws.send(JSON.stringify({ cmd: 'stopRecording' })), 1600);

@@ -121,7 +121,7 @@ function decodeEntityState(buf) {
     marking,
     capabilities,
     articulationParams,
-    headingDeg: ((orientation.psi * 180) / Math.PI + 360) % 360,
+    headingDeg: ((((orientation.psi * 180) / Math.PI) % 360 + 360) % 360),
   };
 }
 
@@ -173,7 +173,7 @@ function decodeDetonation(buf) {
 
 // --- Electromagnetic Emission PDU (type 23) --------------------------------
 function decodeEmission(buf) {
-  if (buf.length < HDR + 28) return { truncated: true };
+  if (buf.length < HDR + 16) return { truncated: true };
   let o = HDR;
   const emittingEntity = readEntityId(buf, o); o += 6;
   o += 6; // event id
@@ -193,7 +193,7 @@ function decodeEmission(buf) {
     const locX = buf.readFloatBE(o), locY = buf.readFloatBE(o + 4), locZ = buf.readFloatBE(o + 8);
     o += 12;
     const beams = [];
-    for (let b = 0; b < numBeams && o + 52 <= buf.length; b++) {
+    for (let b = 0; b < numBeams && o + 48 <= buf.length; b++) {
       const beamStart = o;
       const beamDataLength = buf.readUInt8(o) * 4;
       const beamNumber = buf.readUInt8(o + 1);
@@ -213,7 +213,7 @@ function decodeEmission(buf) {
       const numTargets = buf.readUInt8(o); o += 1;
       o += 2; // jamming + padding
       // skip track/jam targets (8 bytes each) and remaining beam bytes
-      o = beamStart + (beamDataLength || (52 + numTargets * 8));
+      o = beamStart + (beamDataLength || (48 + numTargets * 8));
       beams.push({
         beamNumber, frequency, band: radarBand(frequency),
         effectiveRadiatedPower, pulseRepetitionFreq, pulseWidth,
@@ -222,7 +222,8 @@ function decodeEmission(buf) {
         numTargets,
       });
     }
-    o = sysStart + (systemDataLength || (o - sysStart));
+    const minSysLen = o - sysStart;
+    o = sysStart + (systemDataLength && systemDataLength >= 20 ? systemDataLength : Math.max(20, minSysLen));
     systems.push({ emitterName, emitterFunction, emitterNumber, numBeams, beams, location: { x: locX, y: locY, z: locZ } });
   }
   return {

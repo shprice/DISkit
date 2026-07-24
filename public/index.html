@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DISkit — IEEE 1278 DIS Toolkit</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="icon" type="image/png" href="diskit.png" />
 </head>
 <body>
   <header>
+    <img src="diskit.png" class="header-logo" alt="DISkit logo" />
     <h1>DISkit</h1>
     <span class="sub">IEEE 1278 DIS Toolkit</span>
     <span id="conn" class="badge off">disconnected</span>
@@ -75,14 +77,14 @@
           <button id="btnOpenDir" title="Open this folder and list its logs">Open</button>
         </div>
         <div class="row">
-          <label class="grow">Log
+          <label class="grow">Log File
             <select id="logSelect"></select>
           </label>
           <button id="btnRefreshLogs" title="Refresh list">↻</button>
         </div>
         <div id="logInfo" class="loginfo"></div>
         <div class="row">
-          <label>Dest <input id="repDest" type="text" value="127.0.0.1" /></label>
+          <label class="grow">Broadcast Address <input id="repDest" type="text" value="127.0.0.1" /></label>
           <label>Port <input id="repPort" type="number" value="3000" /></label>
         </div>
         <div class="row">
@@ -90,7 +92,7 @@
           <label class="grow">Group <input id="repGroup" type="text" value="239.1.2.3" disabled /></label>
         </div>
         <div class="row">
-          <label>Speed
+          <label class="inline">Speed
             <select id="repSpeed">
               <option>0.5</option><option selected>1</option><option>2</option>
               <option>5</option><option>10</option><option>50</option>
@@ -115,6 +117,10 @@
           <button id="btnPlay" class="primary">▶ Play</button>
           <button id="btnPause">⏸ Pause</button>
           <button id="btnStopReplay">⏹ Stop</button>
+          <label class="grow inline" style="margin-left: auto;">
+            <input id="repBmLabel" type="text" placeholder="Bookmark label" style="max-width: 160px;" />
+            <button id="btnRepBookmark" title="Add bookmark at current playback position">+ Bookmark</button>
+          </label>
         </div>
         <div class="timeline" id="repTimeline" title="Click to seek; click a bookmark to jump to it">
           <div class="tl-track"><div class="tl-fill" id="progBar"></div></div>
@@ -134,7 +140,6 @@
         </fieldset>
         <div class="row">
           <button id="btnExportPcap">Export selected to PCAP</button>
-          <button id="btnDeleteLog" class="danger">Delete</button>
         </div>
       </div>
     </section>

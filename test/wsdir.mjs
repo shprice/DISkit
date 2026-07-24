@@ -22,6 +22,7 @@ ws.on('message', (d) => {
     if (!has) { console.error('FAIL sample.dislog not listed'); process.exit(1); }
     if (!m.browseDir || path.resolve(m.browseDir) !== dir2) { console.error('FAIL browseDir not echoed'); process.exit(1); }
     console.log(`OK  setBrowseDir listed ${m.logs.length} log(s) from ${m.browseDir}`);
+    ws.send(JSON.stringify({ cmd: 'setBrowseDir', dir: 'logs' }));
     ws.close(); fs.rmSync(dir2, { recursive: true, force: true }); process.exit(0);
   }
 });

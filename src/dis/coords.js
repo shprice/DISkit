@@ -30,7 +30,9 @@ export function ecefToGeodetic(x, y, z) {
   const lon = Math.atan2(y, x);
   const sinLat = Math.sin(lat);
   const N = A / Math.sqrt(1 - E2 * sinLat * sinLat);
-  const alt = p / Math.cos(lat) - N;
+  const alt = Math.abs(lat) > 0.785398
+    ? (Math.abs(z) / Math.sin(Math.abs(lat)) - N * (1 - E2))
+    : (p / Math.cos(lat) - N);
   return { lat: lat * RAD2DEG, lon: lon * RAD2DEG, alt };
 }
 

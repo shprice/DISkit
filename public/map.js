@@ -85,7 +85,10 @@ const MapView = (() => {
     ctx = canvas.getContext('2d');
     resize();
     loadCoastline();
-    window.addEventListener('resize', () => { resize(); draw(); });
+    // ResizeObserver fires on any layout change (window resize, grid reflow, etc.)
+    // so the canvas coordinate space always matches the container's current size.
+    new ResizeObserver(() => { resize(); if (!useTiles) draw(); else if (leaflet) leaflet.invalidateSize(); })
+      .observe(canvas.parentElement);
 
     canvas.addEventListener('click', (e) => {
       if (useTiles) return;
@@ -94,9 +97,10 @@ const MapView = (() => {
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       const b = bounds(lastEntities) || WORLD;
       const w = canvas.width, h = canvas.height;
+      const { mapW: cMapW, mapH: cMapH, ox: cOx, oy: cOy } = projGeo(b, w, h);
       const proj = (lat, lon) => ({
-        x: (((lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX,
-        y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY,
+        x: ((lon - b.minLon) / (b.maxLon - b.minLon) * cMapW + cOx) * zoom + panX,
+        y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * cMapH + cOy) * zoom + panY,
       });
       let best = null, bestDist = 22;
       for (const ent of lastEntities) {
@@ -132,11 +136,12 @@ const MapView = (() => {
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       const b = bounds(lastEntities) || WORLD;
       const w = canvas.width, h = canvas.height;
+      const { mapW: hMapW, mapH: hMapH, ox: hOx, oy: hOy } = projGeo(b, w, h);
       let nearEntity = false;
       for (const ent of lastEntities) {
         if (!isFinite(ent.lat) || !isFinite(ent.lon)) continue;
-        const px = (((ent.lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX;
-        const py = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY;
+        const px = ((ent.lon - b.minLon) / (b.maxLon - b.minLon) * hMapW + hOx) * zoom + panX;
+        const py = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * hMapH + hOy) * zoom + panY;
         if (Math.hypot(px - mx, py - my) < 22) { nearEntity = true; break; }
       }
       canvas.style.cursor = nearEntity ? 'pointer' : 'grab';
@@ -188,6 +193,21 @@ const MapView = (() => {
     return { minLat: minLat - padLat, maxLat: maxLat + padLat, minLon: minLon - padLon, maxLon: maxLon + padLon };
   }
 
+  // Returns the letterboxed map rect inside (w×h) with cosLat aspect correction.
+  function projGeo(b, w, h) {
+    const midLat = (b.minLat + b.maxLat) / 2;
+    const cosLat = Math.cos(midLat * Math.PI / 180) || 1;
+    const natural = ((b.maxLon - b.minLon) * cosLat) / (b.maxLat - b.minLat);
+    const actual = w / h;
+    let mapW, mapH, ox, oy;
+    if (actual > natural) {
+      mapH = h; mapW = h * natural; ox = (w - mapW) / 2; oy = 0;
+    } else {
+      mapW = w; mapH = w / natural; ox = 0; oy = (h - mapH) / 2;
+    }
+    return { mapW, mapH, ox, oy };
+  }
+
   function draw() {
     if (useTiles) return;
     const w = canvas.width, h = canvas.height;
@@ -195,9 +215,10 @@ const MapView = (() => {
     const hasEntities = lastEntities.some((e) => isFinite(e.lat) && isFinite(e.lon));
     const b = bounds(lastEntities) || WORLD;
 
+    const { mapW, mapH, ox, oy } = projGeo(b, w, h);
     const project = (lat, lon) => ({
-      x: (((lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX,
-      y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY,
+      x: ((lon - b.minLon) / (b.maxLon - b.minLon) * mapW + ox) * zoom + panX,
+      y: ((1 - (lat - b.minLat) / (b.maxLat - b.minLat)) * mapH + oy) * zoom + panY,
     });
 
     // grid
@@ -284,8 +305,9 @@ const MapView = (() => {
         } else if (canvas) {
           const b = bounds(lastEntities) || WORLD;
           const w = canvas.width, h = canvas.height;
-          const relX = ((e.lon - b.minLon) / (b.maxLon - b.minLon)) * w * zoom;
-          const relY = (1 - (e.lat - b.minLat) / (b.maxLat - b.minLat)) * h * zoom;
+          const { mapW: sMapW, mapH: sMapH, ox: sOx, oy: sOy } = projGeo(b, w, h);
+          const relX = ((e.lon - b.minLon) / (b.maxLon - b.minLon) * sMapW + sOx) * zoom;
+          const relY = ((1 - (e.lat - b.minLat) / (b.maxLat - b.minLat)) * sMapH + sOy) * zoom;
           panX = w / 2 - relX;
           panY = h / 2 - relY;
         }
@@ -332,14 +354,20 @@ const MapView = (() => {
     } catch { return null; }
   }
 
-  function updateLeaflet() {
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function updateLeaflet(entities) {
+    if (!leaflet) return;
+    const list = entities || lastEntities || [];
     const seen = new Set();
-    for (const e of lastEntities) {
+    for (const e of list) {
       if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
       seen.add(e.key);
       const col = forceColors[e.forceId] || '#c9a227';
       let m = markers.get(e.key);
-      const label = e.marking || e.key;
+      const label = escapeHtml(e.marking || e.key);
       const isSelected = e.key === selectedKey;
       const milIcon = makeMilIcon(e);
 
@@ -410,7 +438,8 @@ const MapView = (() => {
         if (b) leaflet.fitBounds([[b.minLat, b.minLon], [b.maxLat, b.maxLon]]);
         updateLeaflet();
         if (infoEl) infoEl.textContent = 'online tiles';
-      } catch {
+      } catch (err) {
+        console.error('Leaflet tile error:', err);
         useTiles = false;
         if (infoEl) infoEl.textContent = 'tiles unavailable — offline view';
         canvas.classList.remove('hidden'); leafletEl.classList.add('hidden');

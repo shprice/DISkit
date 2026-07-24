@@ -4,6 +4,7 @@
 
 import http from 'http';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import express from 'express';
@@ -13,11 +14,32 @@ import { Capture } from './capture.js';
 import { Player } from './player.js';
 import { Stats } from './stats.js';
 import { exportToPcap } from './pcap.js';
-import { readMeta } from './logformat.js';
+import { readMeta, updateMeta } from './logformat.js';
+
+export function getLocalBroadcastAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254.')) {
+        if (iface.broadcast) return iface.broadcast;
+        if (iface.address && iface.netmask) {
+          const ip = iface.address.split('.').map(Number);
+          const mask = iface.netmask.split('.').map(Number);
+          if (ip.length === 4 && mask.length === 4) {
+            return ip.map((octet, i) => (octet | (~mask[i] & 0xff))).join('.');
+          }
+        }
+      }
+    }
+  }
+  return '255.255.255.255';
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const config = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+config.replay = config.replay || {};
+config.replay.destAddress = getLocalBroadcastAddress();
 const LOG_DIR = path.resolve(ROOT, config.logDir || 'logs');
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -109,12 +131,16 @@ function startReplay(opts) {
       stats,
       onSample,
       onProgress: (p) => broadcast({ kind: 'progress', progress: p }),
-      onEnd: (e) => broadcast({ kind: 'replayEnded', ...e }),
+      onEnd: (e) => {
+        mode = 'idle';
+        broadcast({ kind: 'status', mode, message: 'Replay finished' });
+        broadcast({ kind: 'replayEnded', ...e });
+      },
       onError: (e) => broadcast({ kind: 'error', message: String(e.message || e) }),
       onVersionWarning: (w) => broadcast({ kind: 'versionWarning', ...w }),
     }
   );
-  const meta = player.load(path.join(browseDir, opts.file));
+  const meta = player.load(path.join(browseDir, path.basename(opts.file)));
   player.play({
     speed: opts.speed || 1,
     loop: !!opts.loop,
@@ -131,7 +157,14 @@ function startReplay(opts) {
 function stopAll() {
   if (capture) { capture.stop(); capture = null; }
   if (player) { player.dispose(); player = null; }
+  stats.reset();
+  sampleBuffer.length = 0;
   mode = 'idle';
+  broadcast({
+    kind: 'stats', mode, recording: false,
+    recordFile: null, recordedCount: 0, recordStartMs: 0, recordBytes: 0,
+    bookmarks: null, stats: stats.snapshot(), samples: [],
+  });
 }
 
 // ---- File listing & pcap export -------------------------------------------
@@ -174,9 +207,29 @@ wss.on('connection', (ws) => {
         case 'resumeReplay': player?.resume(); break;
         case 'seek': player?.seek(m.offsetMicros); break;
         case 'addBookmark': {
-          if (!isRecording()) { throw new Error('Not recording — start a recording to add bookmarks'); }
-          const bm = capture.addBookmark(m.label);
-          broadcast({ kind: 'bookmarkAdded', bookmark: bm, bookmarks: capture.bookmarks });
+          const label = String(m.label || '').slice(0, 200) || 'bookmark';
+          if (isRecording()) {
+            const bm = capture.addBookmark(label);
+            broadcast({ kind: 'bookmarkAdded', bookmark: bm, bookmarks: capture.bookmarks });
+          } else {
+            const targetFile = m.file ? path.join(browseDir, path.basename(m.file)) : (player ? player.logPath : null);
+            if (!targetFile || !fs.existsSync(targetFile)) {
+              throw new Error('No active recording or log file selected to add bookmark');
+            }
+            const offsetMicros = m.offsetMicros != null ? Number(m.offsetMicros) : (player ? player.currentOffsetMicros() : 0);
+            const bm = { offsetMicros, label };
+            const updatedMeta = updateMeta(targetFile, (meta) => {
+              meta.bookmarks = meta.bookmarks || [];
+              meta.bookmarks.push(bm);
+              meta.bookmarks.sort((a, b) => a.offsetMicros - b.offsetMicros);
+              return meta;
+            });
+            if (player && player.logPath === targetFile) {
+              player.meta = updatedMeta;
+            }
+            broadcast({ kind: 'bookmarkAdded', bookmark: bm, bookmarks: updatedMeta?.bookmarks || [], file: path.basename(targetFile) });
+            broadcast({ kind: 'logs', logs: listLogs(), browseDir });
+          }
           break;
         }
         case 'setFilters':

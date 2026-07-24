@@ -78,7 +78,7 @@ const LOG = './test/_integ.dislog';
   assert(elapsed < 350, `10x replay took ${elapsed}ms (should be < real-time 400ms)`);
   console.log('OK  replayed', player.sentCount, 'PDUs @10x in', elapsed, 'ms; re-captured', rxStats.totalPdus);
 
-  fs.unlinkSync(LOG); fs.unlinkSync(`${LOG}.meta.json`);
+  fs.unlinkSync(LOG); if (fs.existsSync(`${LOG}.meta.json`)) fs.unlinkSync(`${LOG}.meta.json`);
   console.log('\nIntegration test passed.');
   process.exit(0);
 })().catch((e) => { console.error('FAIL', e); process.exit(1); });

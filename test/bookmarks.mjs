@@ -26,7 +26,7 @@ function pdu(n) { const b = Buffer.alloc(16); b.writeUInt8(7, 0); b.writeUInt8(1
   const m2 = readMeta(f1);
   assert.equal(m2.bookmarks.length, 2, 'bookmarks persisted to sidecar');
   console.log(`OK  bookmarks: ${m2.bookmarks.map((b) => `${b.label}@${(b.offsetMicros / 1000).toFixed(0)}ms`).join(', ')}`);
-  fs.unlinkSync(f1); fs.unlinkSync(`${f1}.meta.json`);
+  fs.unlinkSync(f1); if (fs.existsSync(`${f1}.meta.json`)) fs.unlinkSync(`${f1}.meta.json`);
 
   // ---- 2. player.seek skips records before the target ----
   const f2 = './test/_seek.dislog';
