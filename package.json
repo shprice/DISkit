@@ -6,7 +6,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "sim": "node src/simulator.js"
+    "sim": "node src/simulator.js",
+    "build:sea": "node scripts/build-sea.mjs"
   },
   "keywords": [
     "DIS",

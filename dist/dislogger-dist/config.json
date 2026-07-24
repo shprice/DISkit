@@ -1,0 +1,18 @@
+{
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "capture": {
+    "port": 3000,
+    "multicastGroup": "239.1.2.3",
+    "bindAddress": "0.0.0.0"
+  },
+  "replay": {
+    "destAddress": "127.0.0.1",
+    "destPort": 3000,
+    "multicast": false,
+    "ttl": 16
+  },
+  "logDir": "logs"
+}

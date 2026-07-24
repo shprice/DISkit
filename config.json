@@ -14,5 +14,5 @@
     "multicast": false,
     "ttl": 16
   },
-  "logDir": "C:\\src\\DISLogger\\logs"
+  "logDir": "logs"
 }

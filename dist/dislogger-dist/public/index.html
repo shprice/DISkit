@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DISkit — IEEE 1278 DIS Toolkit</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" type="image/png" href="diskit.png" />
+</head>
+<body>
+  <header>
+    <img src="diskit.png" class="header-logo" alt="DISkit logo" />
+    <h1>DISkit</h1>
+    <span class="sub">IEEE 1278 DIS Toolkit</span>
+    <span id="conn" class="badge off">disconnected</span>
+    <span id="modeBadge" class="badge idle">idle</span>
+    <span id="recBadge" class="badge rec hidden"><span class="rec-dot" id="recDotHeader"></span><span id="recText">REC</span></span>
+    <div id="evtFlashContainer"></div>
+  </header>
+
+  <main>
+    <section class="panel control">
+      <div class="tabs">
+        <button class="tab active" data-tab="capture">Log</button>
+        <button class="tab" data-tab="replay">Replay</button>
+      </div>
+
+      <div class="tabbody" id="tab-capture">
+        <div class="row">
+          <label>Port <input id="capPort" type="number" value="3000" /></label>
+          <label class="chk"><input id="capMulti" type="checkbox" /> Multicast</label>
+          <label class="grow">Group <input id="capGroup" type="text" value="239.1.2.3" disabled /></label>
+        </div>
+        <div class="row">
+          <label class="grow">Bind Address <input id="capBind" type="text" value="0.0.0.0" /></label>
+        </div>
+        <div class="row">
+          <button id="btnListen" class="primary">Start Listening</button>
+          <button id="btnStop">Stop</button>
+        </div>
+        <fieldset>
+          <legend>Recording</legend>
+          <div class="row">
+            <label class="grow">Save location <input id="recDir" type="text" placeholder="logs folder path" /></label>
+            <button id="btnSetRecDir" title="Set as default save location">Set</button>
+          </div>
+          <div class="row">
+            <label class="grow">File <input id="recName" type="text" placeholder="(auto timestamp).dislog" /></label>
+          </div>
+          <div class="row">
+            <label class="grow">PDU types <div id="recFilter" class="multiselect"></div></label>
+            <label class="grow">DIS versions <div id="recVersionFilter" class="multiselect"></div></label>
+          </div>
+          <div class="row">
+            <label class="grow">Site IDs <input id="recSiteIds" type="text" placeholder="blank = all, e.g. 1,2" /></label>
+            <label class="grow">App IDs <input id="recAppIds" type="text" placeholder="blank = all, e.g. 1" /></label>
+          </div>
+          <div class="row">
+            <button id="btnRecord" class="rec">● Record</button>
+            <button id="btnStopRecord">Stop Recording</button>
+          </div>
+          <div class="row">
+            <label class="grow">Bookmark <input id="bmLabel" type="text" placeholder="label this moment…" /></label>
+            <button id="btnBookmark" title="Add a bookmark at the current recording time">＋ Mark</button>
+          </div>
+          <div class="timeline" id="recTimeline">
+            <div class="tl-track"><div class="tl-fill" id="recTlFill"></div></div>
+            <div class="tl-marks" id="recTlMarks"></div>
+          </div>
+          <div id="recTlTime" class="hint">00:00:00</div>
+        </fieldset>
+      </div>
+
+      <div class="tabbody hidden" id="tab-replay">
+        <div class="row">
+          <label class="grow">Log folder <input id="browseDir" type="text" placeholder="folder path" /></label>
+          <button id="btnOpenDir" title="Open this folder and list its logs">Open</button>
+        </div>
+        <div class="row">
+          <label class="grow">Log File
+            <select id="logSelect"></select>
+          </label>
+          <button id="btnRefreshLogs" title="Refresh list">↻</button>
+        </div>
+        <div id="logInfo" class="loginfo"></div>
+        <div class="row">
+          <label class="grow">Broadcast Address <input id="repDest" type="text" value="127.0.0.1" /></label>
+          <label>Port <input id="repPort" type="number" value="3000" /></label>
+        </div>
+        <div class="row">
+          <label class="chk"><input id="repMulti" type="checkbox" /> Multicast</label>
+          <label class="grow">Group <input id="repGroup" type="text" value="239.1.2.3" disabled /></label>
+        </div>
+        <div class="row">
+          <label class="inline">Speed
+            <select id="repSpeed">
+              <option>0.5</option><option selected>1</option><option>2</option>
+              <option>5</option><option>10</option><option>50</option>
+              <option>100</option><option>1000</option>
+            </select>x
+          </label>
+          <label class="chk"><input id="repLoop" type="checkbox" /> Loop</label>
+        </div>
+        <div class="row">
+          <label class="grow">Replay as version
+            <select id="repAsVersion">
+              <option value="">Original (no change)</option>
+              <option value="4">v4 — IEEE 1278-1993</option>
+              <option value="5">v5 — IEEE 1278.1-1995</option>
+              <option value="6">v6 — IEEE 1278.1a-1998</option>
+              <option value="7">v7 — IEEE 1278.1-2012</option>
+            </select>
+          </label>
+          <span id="verWarnBadge" class="badge warn hidden" title="Some PDU types are not defined in the target version">⚠ version warnings</span>
+        </div>
+        <div class="row">
+          <button id="btnPlay" class="primary">▶ Play</button>
+          <button id="btnPause">⏸ Pause</button>
+          <button id="btnStopReplay">⏹ Stop</button>
+          <label class="grow inline" style="margin-left: auto;">
+            <input id="repBmLabel" type="text" placeholder="Bookmark label" style="max-width: 160px;" />
+            <button id="btnRepBookmark" title="Add bookmark at current playback position">+ Bookmark</button>
+          </label>
+        </div>
+        <div class="timeline" id="repTimeline" title="Click to seek; click a bookmark to jump to it">
+          <div class="tl-track"><div class="tl-fill" id="progBar"></div></div>
+          <div class="tl-marks" id="repTlMarks"></div>
+        </div>
+        <div id="progText" class="hint"></div>
+        <fieldset>
+          <legend>Replay filters</legend>
+          <div class="row">
+            <label class="grow">PDU types <div id="repFilter" class="multiselect"></div></label>
+            <label class="grow">DIS versions <div id="repVersionFilter" class="multiselect"></div></label>
+          </div>
+          <div class="row">
+            <label class="grow">Site IDs <input id="repSiteIds" type="text" placeholder="blank = all, e.g. 1,2" /></label>
+            <label class="grow">App IDs <input id="repAppIds" type="text" placeholder="blank = all, e.g. 1" /></label>
+          </div>
+        </fieldset>
+        <div class="row">
+          <button id="btnExportPcap">Export selected to PCAP</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel stats">
+      <h3>PDU Stats</h3>
+      <div class="metrics">
+        <div class="metric"><span id="mPdus">0</span><label>PDUs</label></div>
+        <div class="metric"><span id="mRate">0</span><label>PDU/s</label></div>
+        <div class="metric"><span id="mEntities">0</span><label>Entities</label></div>
+        <div class="metric"><span id="mEmitters">0</span><label>Emitters</label></div>
+        <div class="metric"><span id="mBytes">0 KB</span><label>Data</label></div>
+      </div>
+      <div class="pietriptych">
+        <div class="pieunit">
+          <canvas id="pieChart" width="130" height="130"></canvas>
+          <div class="hint">PDU Types</div>
+        </div>
+        <div class="pieunit">
+          <canvas id="sitePie" width="130" height="130"></canvas>
+          <div class="hint">Site ID</div>
+        </div>
+        <div class="pieunit">
+          <canvas id="appPie" width="130" height="130"></canvas>
+          <div class="hint">App ID</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel map">
+      <div class="maphead">
+        <h3>Entity map</h3>
+        <label class="chk"><input id="mapTiles" type="checkbox" /> Online tiles</label>
+        <button id="mapReset" class="mini" title="Reset zoom/pan">Reset view</button>
+        <button id="mapExpand" class="mini" title="Expand map">⛶</button>
+        <span id="mapInfo" class="hint"></span>
+      </div>
+      <div id="mapContainer">
+        <canvas id="mapCanvas"></canvas>
+        <div id="leafletMap" class="hidden"></div>
+        <div class="sym-scale-ctrl">
+          <span class="sym-scale-lbl">+</span>
+          <input type="range" id="symScale" min="12" max="60" value="28" orient="vertical" title="Symbol size" />
+          <span class="sym-scale-lbl">−</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel monitor">
+      <h3>PDU Monitor</h3>
+      <div class="ptabs">
+        <button class="ptab active" data-ptab="entities">Entities</button>
+        <button class="ptab" data-ptab="emitters">Emissions</button>
+        <button class="ptab" data-ptab="fires">Fires</button>
+        <button class="ptab" data-ptab="detonations">Dets</button>
+        <button class="ptab" data-ptab="transmitters">Transmitters</button>
+        <button class="ptab" data-ptab="signals">Signals</button>
+      </div>
+      <div class="ptabbody" id="ptab-entities">
+        <div class="tablewrap">
+          <table id="entityTable" class="sel-table">
+            <thead><tr><th>Marking</th><th>Force</th><th>Kind</th><th>Lat</th><th>Lon</th><th>Alt</th><th>Hdg</th><th>Spd</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-emitters">
+        <div class="tablewrap">
+          <table id="emitterTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Emitter</th><th>Function</th><th>Band</th><th>Freq MHz</th><th>PRF</th><th>ERP</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-fires">
+        <div class="tablewrap">
+          <table id="firesTable">
+            <thead><tr><th>Time</th><th>Firing</th><th>Target</th><th>Munition</th><th>Range</th></tr></thead>
+            <tbody id="firesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-detonations">
+        <div class="tablewrap">
+          <table id="detsTable">
+            <thead><tr><th>Time</th><th>Firing</th><th>Target</th><th>Munition</th><th>Result</th></tr></thead>
+            <tbody id="detsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-transmitters">
+        <div class="tablewrap">
+          <table id="txTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Radio</th><th>State</th><th>Freq MHz</th><th>Band</th><th>Power dBm</th></tr></thead>
+            <tbody id="txTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-signals">
+        <div class="tablewrap">
+          <table id="sigTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Radio</th><th>Encoding</th><th>TDL</th><th>Rate Hz</th><th>Bits</th></tr></thead>
+            <tbody id="sigTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel details">
+      <h3>Details</h3>
+      <div id="detailsContent" class="details-wrap">
+        <span class="hint">Select an entity or emitter</span>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="console-drawer" id="consoleDrawer">
+    <div class="console-tab" id="consoleTab">
+      <span class="console-expand">⤢</span>
+      <span class="console-title">Console</span>
+      <span class="console-chevron" id="consoleChevron">▲</span>
+    </div>
+    <div class="console-body">
+      <div id="feed" class="feed"></div>
+    </div>
+  </div>
+
+  <script src="milsymbol.js"></script>
+  <script src="map.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

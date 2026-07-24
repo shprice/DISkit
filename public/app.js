@@ -921,8 +921,14 @@ function init() {
   bindMulti('repMulti', 'repGroup');
 
   // Log directory controls.
-  $('btnSetRecDir').onclick = () => $('recDir').value && send({ cmd: 'setRecordDir', dir: $('recDir').value });
-  $('btnOpenDir').onclick = () => $('browseDir').value && send({ cmd: 'setBrowseDir', dir: $('browseDir').value });
+  const doSetRecDir = () => { if ($('recDir').value) send({ cmd: 'setRecordDir', dir: $('recDir').value }); };
+  const doOpenDir = () => { send({ cmd: 'browseFolder' }); };
+  $('btnSetRecDir').onclick = doSetRecDir;
+  $('recDir').onkeydown = (e) => { if (e.key === 'Enter') doSetRecDir(); };
+  $('btnOpenDir').onclick = doOpenDir;
+  $('browseDir').onkeydown = (e) => {
+    if (e.key === 'Enter' && $('browseDir').value) send({ cmd: 'setBrowseDir', dir: $('browseDir').value });
+  };
 
   $('mapTiles').onchange = () => window.MapView.setTiles($('mapTiles').checked, $('mapInfo'));
   $('mapReset').onclick = () => window.MapView.resetView();

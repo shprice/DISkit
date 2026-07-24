@@ -6,6 +6,7 @@ import http from 'http';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
@@ -35,16 +36,97 @@ export function getLocalBroadcastAddress() {
   return '255.255.255.255';
 }
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
-const config = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+export function openBrowser(url) {
+  try {
+    const platform = process.platform;
+    if (platform === 'win32') {
+      exec(`start "" "${url}"`);
+    } else if (platform === 'darwin') {
+      exec(`open "${url}"`);
+    } else {
+      exec(`xdg-open "${url}"`);
+    }
+  } catch {}
+}
+
+export function pickFolder(initialDir) {
+  return new Promise((resolve) => {
+    const platform = process.platform;
+
+    if (platform === 'win32') {
+      const psScript = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
+        '$f.Description = "Select DISLogger Log Folder"',
+        initialDir ? `$f.SelectedPath = "${initialDir.replace(/\\/g, '\\\\')}"` : '',
+        'if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {',
+        '  [Console]::WriteLine($f.SelectedPath)',
+        '}'
+      ].filter(Boolean).join('\r\n');
+
+      const tempPs1 = path.join(os.tmpdir(), `dislogger_pick_${Date.now()}_${Math.random().toString(36).slice(2)}.ps1`);
+      try {
+        fs.writeFileSync(tempPs1, psScript, 'utf8');
+        exec(`powershell -NoProfile -ExecutionPolicy Bypass -STA -File "${tempPs1}"`, (err, stdout) => {
+          try { fs.unlinkSync(tempPs1); } catch {}
+          if (err || !stdout) {
+            resolve(null);
+          } else {
+            resolve(stdout.trim() || null);
+          }
+        });
+      } catch {
+        resolve(null);
+      }
+      return;
+    }
+
+    if (platform === 'darwin') {
+      exec(`osascript -e 'POSIX path of (choose folder with prompt "Select DISLogger Log Folder")'`, (err, stdout) => {
+        if (err || !stdout) resolve(null);
+        else resolve(stdout.trim() || null);
+      });
+      return;
+    }
+
+    // Linux
+    const cmd = `zenity --file-selection --directory --title="Select DISLogger Log Folder" 2>/dev/null || kdialog --getexistingdirectory 2>/dev/null || python3 -c "import tkinter as t, filedialog as f; root=t.Tk(); root.withdraw(); print(f.askdirectory(title='Select DISLogger Log Folder'))" 2>/dev/null`;
+    exec(cmd, (err, stdout) => {
+      if (err || !stdout) resolve(null);
+      else resolve(stdout.trim() || null);
+    });
+  });
+}
+
+const __dirname = typeof import.meta !== 'undefined' && import.meta && import.meta.url
+  ? path.dirname(fileURLToPath(import.meta.url))
+  : path.resolve();
+const execDir = path.dirname(process.execPath);
+const isSEA = process.execPath.endsWith('dislogger') || process.execPath.endsWith('dislogger.exe');
+const ROOT = isSEA ? execDir : path.resolve(__dirname, '..');
+
+const configPath = fs.existsSync(path.join(ROOT, 'config.json'))
+  ? path.join(ROOT, 'config.json')
+  : path.join(__dirname, '../config.json');
+
+const config = fs.existsSync(configPath)
+  ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
+  : { web: { port: 8080, host: '0.0.0.0' }, capture: { port: 3000, multicastGroup: '239.1.2.3', bindAddress: '0.0.0.0' } };
+
 config.replay = config.replay || {};
 config.replay.destAddress = getLocalBroadcastAddress();
-const LOG_DIR = path.resolve(ROOT, config.logDir || 'logs');
+const logDirSetting = config.logDir || 'logs';
+const LOG_DIR = path.isAbsolute(logDirSetting)
+  ? logDirSetting
+  : path.resolve(ROOT, logDirSetting);
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
+const publicDir = fs.existsSync(path.join(ROOT, 'public'))
+  ? path.join(ROOT, 'public')
+  : path.join(__dirname, '../public');
+
 const app = express();
-app.use(express.static(path.join(ROOT, 'public')));
+app.use(express.static(publicDir));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -194,7 +276,7 @@ function listLogs() {
 wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ kind: 'hello', config, mode, recording: isRecording(), recordDir, browseDir, logs: listLogs() }));
 
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     let m;
     try { m = JSON.parse(data); } catch { return; }
     try {
@@ -250,23 +332,35 @@ wss.on('connection', (ws) => {
         case 'stop': stopAll(); broadcast({ kind: 'status', mode, message: 'Stopped' }); break;
         case 'listLogs': ws.send(JSON.stringify({ kind: 'logs', logs: listLogs(), browseDir })); break;
         case 'setRecordDir': {
-          const dir = path.resolve(m.dir || '');
+          const rawDir = String(m.dir || '').trim();
+          const dir = path.isAbsolute(rawDir) ? rawDir : path.resolve(ROOT, rawDir);
           fs.mkdirSync(dir, { recursive: true });
           recordDir = dir;
           browseDir = dir;                              // browse the same folder by default
-          config.logDir = dir;                          // persist as the new default
-          fs.writeFileSync(path.join(ROOT, 'config.json'), JSON.stringify(config, null, 2));
+          config.logDir = rawDir;                       // persist setting as provided
+          try { fs.writeFileSync(configPath, JSON.stringify(config, null, 2)); } catch {}
           broadcast({ kind: 'dirs', recordDir, browseDir, message: `Save location set to ${dir}` });
           broadcast({ kind: 'logs', logs: listLogs(), browseDir });
           break;
         }
         case 'setBrowseDir': {
-          const dir = path.resolve(m.dir || '');
-          if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
-            throw new Error(`Not a folder: ${dir}`);
-          }
+          const rawDir = String(m.dir || '').trim();
+          const dir = path.isAbsolute(rawDir) ? rawDir : path.resolve(ROOT, rawDir);
+          fs.mkdirSync(dir, { recursive: true });
           browseDir = dir;
-          ws.send(JSON.stringify({ kind: 'logs', logs: listLogs(), browseDir }));
+          const foundLogs = listLogs();
+          broadcast({ kind: 'dirs', recordDir, browseDir, message: `Opened folder: ${dir} (${foundLogs.length} log file${foundLogs.length === 1 ? '' : 's'})` });
+          broadcast({ kind: 'logs', logs: foundLogs, browseDir });
+          break;
+        }
+        case 'browseFolder': {
+          const folder = await pickFolder(browseDir);
+          if (folder) {
+            browseDir = folder;
+            const foundLogs = listLogs();
+            broadcast({ kind: 'dirs', recordDir, browseDir, message: `Opened folder: ${browseDir} (${foundLogs.length} log file${foundLogs.length === 1 ? '' : 's'})` });
+            broadcast({ kind: 'logs', logs: foundLogs, browseDir });
+          }
           break;
         }
         case 'exportPcap': {
@@ -294,8 +388,33 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(config.web.port, config.web.host, () => {
-  console.log(`DISLogger UI: http://${config.web.host}:${config.web.port}`);
-  console.log(`Logs directory: ${LOG_DIR}`);
+  const hostStr = config.web.host === '0.0.0.0' ? '127.0.0.1' : config.web.host;
+  const url = `http://${hostStr}:${config.web.port}`;
+  const broadcastAddr = getLocalBroadcastAddress();
+
+  console.log('\n=============================================================');
+  console.log('  _____  _____ _____  _    _ _   ');
+  console.log(' |  __ \\|_   _/ ____|| |  (_) |  ');
+  console.log(' | |  | | | | | (___ | | ___| |_ ');
+  console.log(' | |  | | | |  \\___ \\| |/ / | __|');
+  console.log(' | |__| |_| |_ ____) |   <| | |_ ');
+  console.log(' |_____/|_____|_____/|_|\\_\\_|_|\\__|');
+  console.log(' IEEE 1278 DIS Traffic Logger & Replay Utility');
+  console.log('=============================================================');
+  console.log(` Web UI Server       : ${url}`);
+  console.log(` Default Capture Port: ${config.capture?.port || 3000} (UDP)`);
+  console.log(` Broadcast Address   : ${broadcastAddr}`);
+  console.log(` Storage Directory   : ${LOG_DIR}`);
+  console.log(` Configuration       : Edit config.json in the app directory`);
+  console.log(`                       to change default settings.`);
+  console.log(` Server Status       : RUNNING (Press Ctrl+C to stop)`);
+  console.log('=============================================================\n');
+
+  const noOpen = process.argv.includes('--no-open') || config.openBrowser === false;
+  if (!noOpen) {
+    console.log(`Opening Web UI in default browser (${url})...\n`);
+    openBrowser(url);
+  }
 });
 
 process.on('SIGINT', () => { stopAll(); process.exit(0); });
