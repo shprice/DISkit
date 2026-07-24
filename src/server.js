@@ -179,6 +179,15 @@ wss.on('connection', (ws) => {
           broadcast({ kind: 'bookmarkAdded', bookmark: bm, bookmarks: capture.bookmarks });
           break;
         }
+        case 'setFilters':
+          if (player) player.setFilters({
+            typeFilter:     m.filterTypes,
+            versionFilter:  m.versionFilter,
+            siteFilter:     m.siteFilter,
+            appFilter:      m.appFilter,
+            replayAsVersion: m.replayAsVersion,
+          });
+          break;
         case 'setSpeed':
           if (player) { player.speed = Math.max(0.01, m.speed); }
           break;

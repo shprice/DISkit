@@ -187,6 +187,18 @@ export class Player {
     }
   }
 
+  // Update any combination of filters mid-playback without restarting.
+  setFilters({ typeFilter, versionFilter, siteFilter, appFilter, replayAsVersion } = {}) {
+    if (typeFilter    !== undefined) this.typeFilter    = new Set((typeFilter    || []).map(Number));
+    if (versionFilter !== undefined) this.versionFilter = new Set((versionFilter || []).map(Number));
+    if (siteFilter    !== undefined) this.siteFilter    = new Set((siteFilter    || []).map(Number));
+    if (appFilter     !== undefined) this.appFilter     = new Set((appFilter     || []).map(Number));
+    if (replayAsVersion !== undefined) {
+      this.replayAsVersion = replayAsVersion || null;
+      this._warnedTypes = new Set(); // reset per-type warnings when target version changes
+    }
+  }
+
   pause() {
     if (this.state !== 'playing') return;
     clearTimeout(this.timer);

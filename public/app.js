@@ -233,13 +233,10 @@ function renderStats(s) {
   $('mEmitters').textContent = s.emitterCount;
   $('mBytes').textContent = Math.round(s.totalBytes / 1024);
 
-  const max = Math.max(1, ...s.types.map((t) => t.count));
   $('typeChart').innerHTML = s.types.map((t, i) => {
     const col = PIE_COLORS[i % PIE_COLORS.length];
-    return `
-    <div class="bar">
+    return `<div class="bar">
       <span class="name" title="${t.name}"><span class="swatch" style="background:${col}"></span>${t.type} ${t.name}</span>
-      <span class="track"><span class="fill" style="width:${(t.count / max * 100).toFixed(1)}%;background:${col}"></span></span>
       <span class="val">${fmt(t.count)}</span>
     </div>`;
   }).join('');
@@ -376,6 +373,19 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
 }
 
+function sendFiltersIfReplaying() {
+  if (appMode !== 'replaying') return;
+  const asVer = $('repAsVersion').value;
+  send({
+    cmd: 'setFilters',
+    filterTypes:     filterPayload($('repFilter')),
+    versionFilter:   filterPayload($('repVersionFilter')),
+    siteFilter:      parseIdList($('repSiteIds').value),
+    appFilter:       parseIdList($('repAppIds').value),
+    replayAsVersion: asVer ? +asVer : null,
+  });
+}
+
 function doPlay() {
   $('verWarnBadge').classList.add('hidden');
   const asVer = $('repAsVersion').value;
@@ -440,6 +450,11 @@ function init() {
   $('btnStopReplay').onclick = () => send({ cmd: 'stop' });
   $('repSpeed').onchange = () => send({ cmd: 'setSpeed', speed: +$('repSpeed').value });
   $('repLoop').onchange = () => send({ cmd: 'setLoop', loop: $('repLoop').checked });
+  $('repAsVersion').onchange = () => sendFiltersIfReplaying();
+  $('repFilter').addEventListener('change', () => sendFiltersIfReplaying());
+  $('repVersionFilter').addEventListener('change', () => sendFiltersIfReplaying());
+  $('repSiteIds').addEventListener('input', () => sendFiltersIfReplaying());
+  $('repAppIds').addEventListener('input', () => sendFiltersIfReplaying());
   $('btnExportPcap').onclick = () => $('logSelect').value && send({ cmd: 'exportPcap', file: $('logSelect').value });
   $('btnDeleteLog').onclick = () => $('logSelect').value &&
     confirm('Delete ' + $('logSelect').value + '?') && send({ cmd: 'deleteLog', file: $('logSelect').value });
