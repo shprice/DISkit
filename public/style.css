@@ -253,6 +253,40 @@ th { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
 }
 .tl-mark:hover .tl-tip { display: block; }
 
+/* Symbol-scale slider overlay on the map */
+.sym-scale-ctrl {
+  position: absolute; right: 10px; top: 10px; z-index: 1000;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: rgba(22, 27, 34, 0.88); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 5px; pointer-events: auto;
+}
+.sym-scale-lbl { font-size: 12px; color: var(--muted); line-height: 1; user-select: none; }
+#symScale {
+  -webkit-appearance: slider-vertical;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 22px; height: 72px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+/* Fire / Detonation flash badge in header */
+#evtFlashContainer { display: flex; gap: 6px; align-items: center; }
+@keyframes flashfade {
+  0% { opacity: 1; transform: scale(1.08); }
+  15% { transform: scale(1); }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.evt-flash {
+  padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;
+  letter-spacing: .5px; text-transform: uppercase; white-space: nowrap;
+  animation: flashfade 2.5s ease-out forwards;
+}
+.evt-flash.fire { background: var(--red); color: #fff; }
+.evt-flash.detonation { background: var(--amber); color: #0d1117; }
+
 @media (max-width: 1100px) {
   main { grid-template-columns: 1fr; grid-template-areas:
     "control" "stats" "map" "monitor" "details"; }

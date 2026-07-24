@@ -305,6 +305,27 @@ function renderStats(s) {
       <td>${escapeHtml(r.band || '')}</td><td>${r.freqMHz}</td><td>${r.prf}</td><td>${r.erp}</td>
     </tr>`).join('');
 
+  const fb = $('firesTableBody');
+  if (fb) {
+    fb.innerHTML = (s.fires || []).map(f => `
+      <tr>
+        <td>${ts2(f.ts)}</td><td>${escapeHtml(f.firingKey)}</td>
+        <td>${escapeHtml(f.targetKey || '—')}</td>
+        <td>${escapeHtml(f.munitionType || '—')}</td>
+        <td>${f.range != null ? fnum(f.range, 0) + ' m' : '—'}</td>
+      </tr>`).join('');
+  }
+  const db = $('detsTableBody');
+  if (db) {
+    db.innerHTML = (s.detonations || []).map(d => `
+      <tr>
+        <td>${ts2(d.ts)}</td><td>${escapeHtml(d.firingKey)}</td>
+        <td>${escapeHtml(d.targetKey || '—')}</td>
+        <td>${escapeHtml(d.munitionType || '—')}</td>
+        <td>${escapeHtml(d.result || '—')}</td>
+      </tr>`).join('');
+  }
+
   // Persist selection highlight across re-renders; refresh details if data changed
   lastStats = s;
   if (selectedKey) {
@@ -343,20 +364,45 @@ function renderDetails(data) {
   if (selectedType === 'entity') {
     const e = data;
     const typeLabel = lookupEntityType(e.type);
-    el.innerHTML = `<dl class="detail-list">
-      <dt>Marking</dt><dd>${escapeHtml(e.marking || '—')}</dd>
-      <dt>Force</dt><dd>${escapeHtml(e.force || '—')}</dd>
-      <dt>Type code</dt><dd>${escapeHtml(e.type || '—')}</dd>
-      ${typeLabel ? `<dt>Type</dt><dd class="enum-type">${escapeHtml(typeLabel)}</dd>` : ''}
-      <dt>Kind</dt><dd>${escapeHtml(e.kind || '—')}</dd>
-      <dt>Domain</dt><dd>${escapeHtml(e.domain || '—')}</dd>
-      <dt>Latitude</dt><dd>${fnum(e.lat, 6) || '—'}</dd>
-      <dt>Longitude</dt><dd>${fnum(e.lon, 6) || '—'}</dd>
-      <dt>Altitude</dt><dd>${fnum(e.alt, 0) !== '' ? fnum(e.alt, 0) + ' m' : '—'}</dd>
-      <dt>Heading</dt><dd>${fnum(e.heading, 1) !== '' ? fnum(e.heading, 1) + '\xB0' : '—'}</dd>
-      <dt>Speed</dt><dd>${fnum(e.speed, 1) !== '' ? fnum(e.speed, 1) + ' m/s' : '—'}</dd>
-      <dt>ID</dt><dd>${escapeHtml(e.key || '—')}</dd>
-    </dl>`;
+    const sidc = window.MapView?.entityToSidc?.(e);
+    let iconHtml = '';
+    if (sidc && window.ms) {
+      try {
+        const sym = new window.ms.Symbol(sidc, { size: 40 });
+        iconHtml = `<div style="margin-bottom:8px">${sym.asSVG()}</div>`;
+      } catch {}
+    }
+    const hasVel = e.velocity && (e.velocity.x || e.velocity.y || e.velocity.z);
+    const hasOri = e.orientation && (e.orientation.psi || e.orientation.theta || e.orientation.phi);
+    const r2d = (r) => (r * 180 / Math.PI).toFixed(1);
+    const hdg = e.orientation ? (((e.orientation.psi * 180 / Math.PI) + 360) % 360).toFixed(1) : (fnum(e.heading, 1) || '—');
+    el.innerHTML = `
+      ${iconHtml}
+      <dl class="detail-list">
+        <dt>Marking</dt><dd>${escapeHtml(e.marking || '—')}</dd>
+        <dt>Force</dt><dd>${escapeHtml(e.force || '—')}</dd>
+        <dt>Type code</dt><dd>${escapeHtml(e.type || '—')}</dd>
+        ${typeLabel ? `<dt>Type</dt><dd class="enum-type">${escapeHtml(typeLabel)}</dd>` : ''}
+        <dt>Kind</dt><dd>${escapeHtml(e.kind || '—')}</dd>
+        <dt>Domain</dt><dd>${escapeHtml(e.domain || '—')}</dd>
+        <dt>Latitude</dt><dd>${fnum(e.lat, 6) || '—'}</dd>
+        <dt>Longitude</dt><dd>${fnum(e.lon, 6) || '—'}</dd>
+        <dt>Altitude</dt><dd>${fnum(e.alt, 0) !== '' ? fnum(e.alt, 0) + ' m' : '—'}</dd>
+        <dt>Heading</dt><dd>${hdg}°</dd>
+        <dt>Speed</dt><dd>${fnum(e.speed, 1) !== '' ? fnum(e.speed, 1) + ' m/s' : '—'}</dd>
+        ${hasVel ? `
+        <dt class="detail-section" style="grid-column:1/-1">Velocity (ECEF m/s)</dt>
+        <dt>Vx</dt><dd>${fnum(e.velocity.x, 2)}</dd>
+        <dt>Vy</dt><dd>${fnum(e.velocity.y, 2)}</dd>
+        <dt>Vz</dt><dd>${fnum(e.velocity.z, 2)}</dd>` : ''}
+        ${hasOri ? `
+        <dt class="detail-section" style="grid-column:1/-1">Orientation</dt>
+        <dt>Pitch (θ)</dt><dd>${r2d(e.orientation.theta)}°</dd>
+        <dt>Roll (φ)</dt><dd>${r2d(e.orientation.phi)}°</dd>` : ''}
+        ${e.appearance != null ? `<dt>Appearance</dt><dd>0x${(e.appearance >>> 0).toString(16).toUpperCase().padStart(8, '0')}</dd>` : ''}
+        ${e.capabilities != null ? `<dt>Capabilities</dt><dd>0x${(e.capabilities >>> 0).toString(16).toUpperCase().padStart(8, '0')}</dd>` : ''}
+        <dt>ID</dt><dd>${escapeHtml(e.key || '—')}</dd>
+      </dl>`;
   } else if (selectedType === 'emitter') {
     const r = data;
     el.innerHTML = `<dl class="detail-list">
@@ -454,7 +500,11 @@ function setupPieTooltips() {
 let feedLines = [];
 function renderFeed(samples) {
   if (!samples || !samples.length) return;
-  for (const s of samples) feedLines.push(`<div class="t${s.type}">${ts()} ${s.name}${s.key ? ' ' + s.key : ''}</div>`);
+  for (const s of samples) {
+    feedLines.push(`<div class="t${s.type}">${ts()} ${s.name}${s.key ? ' ' + s.key : ''}</div>`);
+    if (s.type === 2) flashEvent('FIRE', 'fire');
+    else if (s.type === 3) flashEvent('DETONATION', 'detonation');
+  }
   if (feedLines.length > 200) feedLines = feedLines.slice(-200);
   const el = $('feed');
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
@@ -462,6 +512,20 @@ function renderFeed(samples) {
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 function ts() { const d = new Date(); return d.toTimeString().slice(0, 8); }
+function ts2(ms) { if (!ms) return ''; const d = new Date(ms); return d.toTimeString().slice(0, 8); }
+
+const _flashTimers = {};
+function flashEvent(text, cls) {
+  const container = $('evtFlashContainer');
+  if (!container) return;
+  const existing = container.querySelector(`.evt-flash.${cls}`);
+  if (existing) { existing.remove(); clearTimeout(_flashTimers[cls]); }
+  const el = document.createElement('span');
+  el.className = `evt-flash ${cls}`;
+  el.textContent = text;
+  container.appendChild(el);
+  _flashTimers[cls] = setTimeout(() => el.remove(), 2600);
+}
 
 function renderLogs() {
   const sel = $('logSelect');
@@ -542,10 +606,8 @@ function init() {
       const entity = lastStats?.entities?.find(x => x.key === key);
       if (entity) {
         selectItem(key, 'entity', entity);
-        // Switch to entities tab in monitor
         document.querySelectorAll('.ptab').forEach(t => t.classList.toggle('active', t.dataset.ptab === 'entities'));
-        $('ptab-entities').classList.remove('hidden');
-        $('ptab-emitters').classList.add('hidden');
+        document.querySelectorAll('.ptabbody').forEach(b => b.classList.toggle('hidden', b.id !== 'ptab-entities'));
       }
     }
   });
@@ -645,9 +707,11 @@ function init() {
   document.querySelectorAll('.ptab').forEach(t => t.addEventListener('click', () => {
     document.querySelectorAll('.ptab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    $('ptab-entities').classList.toggle('hidden', t.dataset.ptab !== 'entities');
-    $('ptab-emitters').classList.toggle('hidden', t.dataset.ptab !== 'emitters');
+    const tab = t.dataset.ptab;
+    document.querySelectorAll('.ptabbody').forEach(b => b.classList.toggle('hidden', b.id !== `ptab-${tab}`));
   }));
+
+  $('symScale').addEventListener('input', () => window.MapView.setSymbolSize(+$('symScale').value));
 
   connect();
 }

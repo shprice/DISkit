@@ -22,8 +22,9 @@ const MapView = (() => {
   let onEntityClick = null;
   let animFrame = null;
 
-  // Milsymbol canvas symbol cache: sidc -> { img, ready, size, anchor } | null
+  // Milsymbol canvas symbol cache: "sidc@size" -> { img, ready, size, anchor } | null
   const symbolCache = new Map();
+  let symbolSize = 28;
 
   // DIS kind.domain → [battleDimension, functionId(6 chars)]
   // Full 2525C SIDC = S + aff(1) + bd(1) + P + fn(6) + ----* = 15 chars
@@ -53,20 +54,28 @@ const MapView = (() => {
 
   function getOrCreateSymbol(sidc) {
     if (!window.ms || !sidc) return null;
-    if (symbolCache.has(sidc)) return symbolCache.get(sidc);
+    const cacheKey = `${sidc}@${symbolSize}`;
+    if (symbolCache.has(cacheKey)) return symbolCache.get(cacheKey);
     try {
-      const sym = new window.ms.Symbol(sidc, { size: 28 });
+      const sym = new window.ms.Symbol(sidc, { size: symbolSize });
       const size = sym.getSize();
       const anchor = sym.getAnchor();
       const entry = { img: new Image(), ready: false, size, anchor };
       entry.img.onload = () => { entry.ready = true; if (!useTiles) draw(); };
       entry.img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sym.asSVG());
-      symbolCache.set(sidc, entry);
+      symbolCache.set(cacheKey, entry);
       return entry;
     } catch {
-      symbolCache.set(sidc, null);
+      symbolCache.set(cacheKey, null);
       return null;
     }
+  }
+
+  function setSymbolSize(n) {
+    symbolSize = Math.max(12, Math.min(60, n));
+    symbolCache.clear();
+    if (useTiles) updateLeaflet();
+    else draw();
   }
 
   function init(opts = {}) {
@@ -115,6 +124,22 @@ const MapView = (() => {
     canvas.addEventListener('mousedown', (e) => {
       dragging = true; lastX = e.clientX; lastY = e.clientY;
       mouseDownX = e.clientX; mouseDownY = e.clientY;
+      canvas.style.cursor = 'grabbing';
+    });
+    canvas.addEventListener('mousemove', (e) => {
+      if (dragging || useTiles) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const b = bounds(lastEntities) || WORLD;
+      const w = canvas.width, h = canvas.height;
+      let nearEntity = false;
+      for (const ent of lastEntities) {
+        if (!isFinite(ent.lat) || !isFinite(ent.lon)) continue;
+        const px = (((ent.lon - b.minLon) / (b.maxLon - b.minLon)) * w) * zoom + panX;
+        const py = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * h) * zoom + panY;
+        if (Math.hypot(px - mx, py - my) < 22) { nearEntity = true; break; }
+      }
+      canvas.style.cursor = nearEntity ? 'pointer' : 'grab';
     });
     window.addEventListener('mousemove', (e) => {
       if (!dragging) return;
@@ -122,7 +147,10 @@ const MapView = (() => {
       lastX = e.clientX; lastY = e.clientY;
       draw();
     });
-    window.addEventListener('mouseup', () => { dragging = false; });
+    window.addEventListener('mouseup', () => {
+      dragging = false;
+      if (!useTiles) canvas.style.cursor = 'grab';
+    });
     canvas.addEventListener('dblclick', () => resetView());
   }
 
@@ -248,6 +276,21 @@ const MapView = (() => {
 
   function setSelected(key) {
     selectedKey = key;
+    if (key) {
+      const e = lastEntities.find(x => x.key === key);
+      if (e && isFinite(e.lat) && isFinite(e.lon)) {
+        if (useTiles && leaflet) {
+          leaflet.panTo([e.lat, e.lon]);
+        } else if (canvas) {
+          const b = bounds(lastEntities) || WORLD;
+          const w = canvas.width, h = canvas.height;
+          const relX = ((e.lon - b.minLon) / (b.maxLon - b.minLon)) * w * zoom;
+          const relY = (1 - (e.lat - b.minLat) / (b.maxLat - b.minLat)) * h * zoom;
+          panX = w / 2 - relX;
+          panY = h / 2 - relY;
+        }
+      }
+    }
     if (useTiles) {
       updateLeaflet();
     } else {
@@ -277,7 +320,7 @@ const MapView = (() => {
     const sidc = entityToSidc(entity);
     if (!sidc) return null;
     try {
-      const sym = new window.ms.Symbol(sidc, { size: 35 });
+      const sym = new window.ms.Symbol(sidc, { size: symbolSize + 7 });
       const anchor = sym.getAnchor();
       const size = sym.getSize();
       return window.L.divIcon({
@@ -381,7 +424,7 @@ const MapView = (() => {
     }
   }
 
-  return { init, update, setTiles, resetView, setSelected };
+  return { init, update, setTiles, resetView, setSelected, setSymbolSize, entityToSidc };
 })();
 
 window.MapView = MapView;

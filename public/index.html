@@ -13,6 +13,7 @@
     <span id="conn" class="badge off">disconnected</span>
     <span id="modeBadge" class="badge idle">idle</span>
     <span id="recBadge" class="badge rec hidden"><span class="rec-dot" id="recDotHeader"></span><span id="recText">REC</span></span>
+    <div id="evtFlashContainer"></div>
   </header>
 
   <main>
@@ -173,6 +174,11 @@
       <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
         <div id="leafletMap" class="hidden"></div>
+        <div class="sym-scale-ctrl">
+          <span class="sym-scale-lbl">+</span>
+          <input type="range" id="symScale" min="12" max="60" value="28" orient="vertical" title="Symbol size" />
+          <span class="sym-scale-lbl">−</span>
+        </div>
       </div>
     </section>
 
@@ -180,6 +186,8 @@
       <div class="ptabs">
         <button class="ptab active" data-ptab="entities">Entities</button>
         <button class="ptab" data-ptab="emitters">Emitters</button>
+        <button class="ptab" data-ptab="fires">Fires</button>
+        <button class="ptab" data-ptab="detonations">Dets</button>
       </div>
       <div class="ptabbody" id="ptab-entities">
         <div class="tablewrap">
@@ -194,6 +202,22 @@
           <table id="emitterTable" class="sel-table">
             <thead><tr><th>Entity</th><th>Emitter</th><th>Function</th><th>Band</th><th>Freq MHz</th><th>PRF</th><th>ERP</th></tr></thead>
             <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-fires">
+        <div class="tablewrap">
+          <table id="firesTable">
+            <thead><tr><th>Time</th><th>Firing</th><th>Target</th><th>Munition</th><th>Range</th></tr></thead>
+            <tbody id="firesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-detonations">
+        <div class="tablewrap">
+          <table id="detsTable">
+            <thead><tr><th>Time</th><th>Firing</th><th>Target</th><th>Munition</th><th>Result</th></tr></thead>
+            <tbody id="detsTableBody"></tbody>
           </table>
         </div>
       </div>

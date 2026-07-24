@@ -21,6 +21,8 @@ export class Stats {
     this.totalBytes = 0;
     this.entities = new Map();  // key -> entity record
     this.emitters = new Map();  // emittingKey -> { systems, lastSeen }
+    this.fires = [];            // rolling log of last 200 Fire events
+    this.detonations = [];      // rolling log of last 200 Detonation events
     this.startTime = Date.now();
     this.rateWindow = [];       // timestamps (ms) for PDU/s estimate
   }
@@ -57,8 +59,36 @@ export class Stats {
         alt: body.geo?.alt,
         heading: body.headingDeg,
         speed: body.speed,
+        velocity: body.velocity,
+        orientation: body.orientation,
+        appearance: body.appearance,
+        capabilities: body.capabilities,
         lastSeen: now,
       });
+    }
+
+    if (header.pduType === 2 && body && body.firingKey) {
+      this.fires.unshift({
+        ts: now,
+        firingKey: body.firingKey,
+        targetKey: body.targetKey,
+        munitionType: body.munitionTypeString,
+        range: body.range,
+        geo: body.geo,
+      });
+      if (this.fires.length > 200) this.fires.pop();
+    }
+
+    if (header.pduType === 3 && body && body.firingKey) {
+      this.detonations.unshift({
+        ts: now,
+        firingKey: body.firingKey,
+        targetKey: body.targetKey,
+        munitionType: body.munitionTypeString,
+        result: body.resultName,
+        geo: body.geo,
+      });
+      if (this.detonations.length > 200) this.detonations.pop();
     }
 
     if (header.pduType === 23 && body && body.emittingKey) {
@@ -136,6 +166,8 @@ export class Stats {
       apps,
       entities: Array.from(this.entities.values()),
       emitters: emitterRows,
+      fires: this.fires.slice(0, 100),
+      detonations: this.detonations.slice(0, 100),
     };
   }
 }
