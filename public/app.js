@@ -740,6 +740,8 @@ function setupPieTooltips() {
 }
 
 let feedLines = [];
+let _feedScheduled = false;
+
 function renderFeed(samples) {
   if (!samples || !samples.length) return;
   for (const s of samples) {
@@ -748,10 +750,18 @@ function renderFeed(samples) {
     else if (s.type === 3) flashEvent('DETONATION', 'detonation');
   }
   if (feedLines.length > 200) feedLines = feedLines.slice(-200);
-  const el = $('feed');
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
-  el.innerHTML = feedLines.join('');
-  if (atBottom) el.scrollTop = el.scrollHeight;
+
+  if (!_feedScheduled) {
+    _feedScheduled = true;
+    requestAnimationFrame(() => {
+      _feedScheduled = false;
+      const el = $('feed');
+      if (!el) return;
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+      el.innerHTML = feedLines.join('');
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    });
+  }
 }
 function ts() { const d = new Date(); return d.toTimeString().slice(0, 8); }
 function ts2(ms) { if (!ms) return ''; const d = new Date(ms); return d.toTimeString().slice(0, 8); }
@@ -921,14 +931,20 @@ function init() {
   bindMulti('repMulti', 'repGroup');
 
   // Log directory controls.
-  const doSetRecDir = () => { if ($('recDir').value) send({ cmd: 'setRecordDir', dir: $('recDir').value }); };
-  const doOpenDir = () => { send({ cmd: 'browseFolder' }); };
+  const doSetRecDir = () => {
+    const v = ($('recDir').value || '').trim();
+    if (v) send({ cmd: 'setRecordDir', dir: v });
+    else send({ cmd: 'browseRecordFolder' });
+  };
+  const doOpenDir = () => {
+    const v = ($('browseDir').value || '').trim();
+    if (v) send({ cmd: 'setBrowseDir', dir: v });
+    else send({ cmd: 'browseFolder' });
+  };
   $('btnSetRecDir').onclick = doSetRecDir;
   $('recDir').onkeydown = (e) => { if (e.key === 'Enter') doSetRecDir(); };
   $('btnOpenDir').onclick = doOpenDir;
-  $('browseDir').onkeydown = (e) => {
-    if (e.key === 'Enter' && $('browseDir').value) send({ cmd: 'setBrowseDir', dir: $('browseDir').value });
-  };
+  $('browseDir').onkeydown = (e) => { if (e.key === 'Enter') doOpenDir(); };
 
   $('mapTiles').onchange = () => window.MapView.setTiles($('mapTiles').checked, $('mapInfo'));
   $('mapReset').onclick = () => window.MapView.resetView();

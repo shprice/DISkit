@@ -298,20 +298,29 @@ function decodeSignal(buf) {
   };
 }
 
-const decoderMap = {
-  1: decodeEntityState,
-  2: decodeFire,
-  3: decodeDetonation,
-  23: decodeEmission,
-  24: decodeDesignator,
-  25: decodeTransmitter,
-  26: decodeSignal,
-};
+// --- Decoder Registry Map ----------------------------------------------------
+
+export const PDU_DECODERS = new Map([
+  [1, decodeEntityState],
+  [2, decodeFire],
+  [3, decodeDetonation],
+  [23, decodeEmission],
+  [24, decodeDesignator],
+  [25, decodeTransmitter],
+  [26, decodeSignal],
+]);
+
+/**
+ * Register or override a PDU body decoder dynamically for a given DIS PDU type ID.
+ */
+export function registerPduDecoder(pduType, decoderFn) {
+  PDU_DECODERS.set(pduType, decoderFn);
+}
 
 // Decode the body for a known PDU type. Returns null when no decoder exists
 // (the PDU is still logged and counted via its header). Never throws.
 export function decodeBody(pduType, buf) {
-  const fn = decoderMap[pduType];
+  const fn = PDU_DECODERS.get(pduType);
   if (!fn) return null;
   try {
     return fn(buf);

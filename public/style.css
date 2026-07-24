@@ -84,10 +84,10 @@ main {
 .tabbody { padding-top: 12px; }
 .tabbody.hidden { display: none; }
 
-.row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.row { display: flex; gap: 8px; align-items: flex-end; margin: 8px 0; flex-wrap: wrap; }
 .row .grow { flex: 1; }
 label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; }
-label.chk, label.inline { flex-direction: row; align-items: center; gap: 6px; }
+label.chk, label.inline { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 6px; }
 input, select {
   background: var(--bg); border: 1px solid var(--line); color: var(--fg);
   border-radius: 5px; padding: 6px 8px; font: inherit; min-width: 0;
