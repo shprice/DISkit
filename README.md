@@ -148,6 +148,20 @@ dislogger/
 
 ---
 
+## Third-Party Libraries & Acknowledgements
+
+DISkit incorporates and relies upon the following third-party libraries and data resources:
+
+- **[milsymbol](https://github.com/spatialillusions/milsymbol)** (MIT License) — MIL-STD-2525 military symbology generator by Måns Beckman ([spatialillusions.com](https://www.spatialillusions.com)).
+- **[Leaflet](https://leafletjs.com/)** (BSD 2-Clause License) & **[OpenStreetMap](https://www.openstreetmap.org/)** (ODbL) — Interactive mapping library and map tile imagery (`© OpenStreetMap contributors`).
+- **[Express](https://expressjs.com/)** (MIT License) — Web application framework for Node.js.
+- **[ws](https://github.com/websockets/ws)** (MIT License) — WebSocket server and client for Node.js.
+- **[adm-zip](https://github.com/cthackers/adm-zip)** (MIT License) — ZIP archive library for `.dislog` file container handling.
+- **[SISO-STD-010 DIS Enumerations](https://github.com/open-dis/dis-enumerations)** — Standardized DIS protocol enumeration data provided by SISO / Open-DIS.
+
+---
+
 ## License
 
 MIT
+
