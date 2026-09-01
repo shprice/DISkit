@@ -127,10 +127,25 @@ function parseIdList(str) {
   return (str || '').split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
 }
 
+// ---- network adapter dropdown ----------------------------------------------
+function populateAdapters(adapters, selected) {
+  const sel = $('capBind');
+  sel.innerHTML = '';
+  for (const { label, address } of adapters) {
+    const opt = document.createElement('option');
+    opt.value = address;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  sel.value = selected || '0.0.0.0';
+  if (!sel.value) sel.value = '0.0.0.0';
+}
+
 // ---- incoming messages -----------------------------------------------------
 function handle(m) {
   switch (m.kind) {
     case 'hello':
+      if (m.networkAdapters) populateAdapters(m.networkAdapters, m.config?.capture?.bindAddress);
       applyConfig(m.config); $('recDir').value = m.recordDir || ''; $('browseDir').value = m.browseDir || '';
       logs = m.logs || []; renderLogs(); setMode(m.mode); setRecording(m.recording, m.recordStartMs); break;
     case 'stats':
@@ -179,7 +194,14 @@ function applyConfig(c) {
   if (!c) return;
   $('capPort').value = c.capture.port;
   $('capGroup').value = c.capture.multicastGroup;
-  $('capBind').value = c.capture.bindAddress;
+  const sel = $('capBind');
+  const addr = c.capture.bindAddress || '0.0.0.0';
+  if (![...sel.options].some(o => o.value === addr)) {
+    const opt = document.createElement('option');
+    opt.value = addr; opt.textContent = addr;
+    sel.appendChild(opt);
+  }
+  sel.value = addr;
   $('repDest').value = c.replay.destAddress;
   $('repPort').value = c.replay.destPort;
 }

@@ -37,6 +37,19 @@ export function getLocalBroadcastAddress() {
   return '255.255.255.255';
 }
 
+export function getNetworkAdapters() {
+  const adapters = [{ label: 'All Interfaces', address: '0.0.0.0' }];
+  const interfaces = os.networkInterfaces();
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    for (const iface of addrs || []) {
+      if (iface.family === 'IPv4') {
+        adapters.push({ label: `${name} (${iface.address})`, address: iface.address });
+      }
+    }
+  }
+  return adapters;
+}
+
 const __dirname = typeof import.meta !== 'undefined' && import.meta && import.meta.url
   ? path.dirname(fileURLToPath(import.meta.url))
   : path.resolve();
@@ -213,7 +226,7 @@ function listLogs() {
 
 // ---- WebSocket message handling -------------------------------------------
 wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ kind: 'hello', config, mode, recording: isRecording(), recordDir, browseDir, logs: listLogs() }));
+  ws.send(JSON.stringify({ kind: 'hello', config, mode, recording: isRecording(), recordDir, browseDir, logs: listLogs(), networkAdapters: getNetworkAdapters() }));
 
   ws.on('message', async (data) => {
     let m;
