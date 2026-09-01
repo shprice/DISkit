@@ -947,7 +947,10 @@ function init() {
     if (!file) return;
     const a = document.createElement('a');
     a.href = `/export-pcap?file=${encodeURIComponent(file)}`;
+    a.download = file.replace(/\.dislog$/, '.pcap');
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
   };
 
   // Multicast group inputs are only relevant when the multicast box is ticked.
