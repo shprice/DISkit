@@ -355,9 +355,22 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(config.web.port, config.web.host, () => {
-  const hostStr = config.web.host === '0.0.0.0' ? '127.0.0.1' : config.web.host;
-  const url = `http://${hostStr}:${config.web.port}`;
+  const port = config.web.port;
+  const bindAll = config.web.host === '0.0.0.0';
+  const localUrl = `http://127.0.0.1:${port}`;
   const broadcastAddr = getLocalBroadcastAddress();
+
+  const networkUrls = [];
+  if (bindAll) {
+    const ifaces = os.networkInterfaces();
+    for (const addrs of Object.values(ifaces)) {
+      for (const iface of addrs || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          networkUrls.push(`http://${iface.address}:${port}`);
+        }
+      }
+    }
+  }
 
   console.log('\n=============================================================');
   console.log('  _____  _____ _____  _    _ _   ');
@@ -368,7 +381,12 @@ server.listen(config.web.port, config.web.host, () => {
   console.log(' |_____/|_____|_____/|_|\\_\\_|_|\\__|');
   console.log(' IEEE 1278 DIS Traffic Logger & Replay Utility');
   console.log('=============================================================');
-  console.log(` Web UI Server       : ${url}`);
+  console.log(` Web UI (local)      : ${localUrl}`);
+  if (networkUrls.length > 0) {
+    networkUrls.forEach(u => console.log(` Web UI (network)    : ${u}`));
+  } else if (!bindAll) {
+    console.log(` Web UI Server       : http://${config.web.host}:${port}`);
+  }
   console.log(` Default Capture Port: ${config.capture?.port || 3000} (UDP)`);
   console.log(` Broadcast Address   : ${broadcastAddr}`);
   console.log(` Storage Directory   : ${LOG_DIR}`);
@@ -379,8 +397,8 @@ server.listen(config.web.port, config.web.host, () => {
 
   const noOpen = process.argv.includes('--no-open') || config.openBrowser === false;
   if (!noOpen) {
-    console.log(`Opening Web UI in default browser (${url})...\n`);
-    openBrowser(url);
+    console.log(`Opening Web UI in default browser (${localUrl})...\n`);
+    openBrowser(localUrl);
   }
 });
 
