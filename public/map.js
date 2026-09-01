@@ -26,30 +26,175 @@ const MapView = (() => {
   const symbolCache = new Map();
   let symbolSize = 28;
 
-  // DIS kind.domain → [battleDimension, functionId(6 chars)]
-  // Full 2525C SIDC = S + aff(1) + bd(1) + P + fn(6) + ----* = 15 chars
-  const SIDC_MAP = {
-    '1.1': ['G', 'UCFV--'],  // Platform/Land → armored vehicle
-    '1.2': ['A', 'MFFW--'],  // Platform/Air → fixed wing
-    '1.3': ['S', 'XM----'],  // Platform/Surface → ship
-    '1.4': ['U', 'SS----'],  // Platform/Subsurface → submarine
-    '1.5': ['P', 'V-----'],  // Platform/Space
-    '2.1': ['G', 'WMS---'],  // Munition/Land
-    '2.2': ['A', 'WMA---'],  // Munition/Air
-    '3.1': ['G', 'UCI---'],  // LifeForm/Land → infantry
-    '3.2': ['A', 'MFH---'],  // LifeForm/Air → helicopter
-    '3.3': ['S', 'UCI---'],  // LifeForm/Surface
+  // DIS entity type → MIL-STD-2525C SIDC lookup tree.
+  // Structure: kind → domain → category → { bd, fn }
+  // Each level has a '_' fallback used when the next key is not found.
+  // Country (parts[2]) is intentionally skipped — affiliation covers friend/foe.
+  const SIDC_TREE = {
+    1: { // Platform
+      _: { bd: 'G', fn: '------' },
+      1: { // Land → G
+        _: { bd: 'G', fn: '------' },
+         0: { bd: 'G', fn: '------' },
+         1: { bd: 'G', fn: 'UCAT--' },  // Tank
+         2: { bd: 'G', fn: 'UCA---' },  // Armored fighting vehicle (IFV/APC)
+         3: { bd: 'G', fn: 'USS---' },  // Armored utility vehicle
+         4: { bd: 'G', fn: 'UCFHE-' },  // Self-propelled artillery
+         5: { bd: 'G', fn: 'UCFH--' },  // Towed artillery
+         6: { bd: 'G', fn: 'USS---' },  // Small wheeled utility
+         7: { bd: 'G', fn: 'USS---' },  // Large wheeled utility
+         8: { bd: 'G', fn: 'USS---' },  // Small tracked utility
+         9: { bd: 'G', fn: 'USS---' },  // Large tracked utility
+        10: { bd: 'G', fn: 'UCFM--' },  // Mortar
+        11: { bd: 'G', fn: 'UCE---' },  // Mine plow
+        12: { bd: 'G', fn: 'UCE---' },  // Mine rake
+        13: { bd: 'G', fn: 'UCE---' },  // Mine roller
+        14: { bd: 'G', fn: 'USS---' },  // Cargo trailer
+        15: { bd: 'G', fn: 'USS---' },  // Fuel trailer
+        16: { bd: 'G', fn: 'USS---' },  // Generator trailer
+        17: { bd: 'G', fn: 'USS---' },  // Water trailer
+        18: { bd: 'G', fn: 'UCE---' },  // Engineer equipment
+        19: { bd: 'G', fn: 'UST---' },  // Heavy equipment transport
+        20: { bd: 'G', fn: 'USXH--' },  // Maintenance trailer
+        21: { bd: 'G', fn: 'USS---' },  // Limber
+        22: { bd: 'G', fn: 'UUAD--' },  // Chemical decon trailer
+        23: { bd: 'G', fn: 'UUS---' },  // Warning system
+        24: { bd: 'G', fn: 'USTR--' },  // Train engine
+        25: { bd: 'G', fn: 'USTR--' },  // Train car
+        26: { bd: 'G', fn: 'USTR--' },  // Train caboose
+        // 27 = Civilian vehicle → no military symbol, falls through to null
+        28: { bd: 'G', fn: 'UCD---' },  // Air defense / missile defense
+        29: { bd: 'G', fn: 'UH1---' },  // C3I system
+        30: { bd: 'G', fn: 'UH1---' },  // Operations facility
+        31: { bd: 'G', fn: 'UUM---' },  // Intelligence facility
+        32: { bd: 'G', fn: 'UUMRS-' },  // Surveillance facility
+        33: { bd: 'G', fn: 'UUS---' },  // Communications facility
+        34: { bd: 'G', fn: 'UH1---' },  // Command facility
+        35: { bd: 'G', fn: 'UH1---' },  // C4I facility
+        36: { bd: 'G', fn: 'UH1---' },  // Control facility
+        37: { bd: 'G', fn: 'UCFT--' },  // Fire control facility
+        38: { bd: 'G', fn: 'UCDO--' },  // Missile defense facility
+        39: { bd: 'G', fn: 'UH1---' },  // Field command post
+        40: { bd: 'G', fn: 'UCR---' },  // Observation post
+      },
+      2: { // Air → A
+        _: { bd: 'A', fn: '------' },
+         0: { bd: 'A', fn: '------' },
+         1: { bd: 'A', fn: 'MFF---' },  // Fighter
+         2: { bd: 'A', fn: 'MFA---' },  // Attack / strike
+         3: { bd: 'A', fn: 'MFB---' },  // Bomber
+         4: { bd: 'A', fn: 'MFC---' },  // Cargo / tanker
+         5: { bd: 'A', fn: 'MFS---' },  // ASW / maritime patrol
+         6: { bd: 'A', fn: 'MFJ---' },  // Electronic warfare
+         7: { bd: 'A', fn: 'MFR---' },  // Reconnaissance
+         8: { bd: 'A', fn: 'MFRW--' },  // Surveillance / AEW / C2
+        20: { bd: 'A', fn: 'MHA---' },  // Attack helicopter
+        21: { bd: 'A', fn: 'MHU---' },  // Utility helicopter
+        22: { bd: 'A', fn: 'MHS---' },  // ASW / patrol helicopter
+        23: { bd: 'A', fn: 'MHC---' },  // Cargo helicopter
+        24: { bd: 'A', fn: 'MHR---' },  // Observation helicopter
+        25: { bd: 'A', fn: 'MHM---' },  // SOF helicopter
+        40: { bd: 'A', fn: 'MFT---' },  // Trainer
+        50: { bd: 'A', fn: 'MFQ---' },  // UAV / unmanned
+      },
+      3: { // Surface → S
+        _: { bd: 'S', fn: '------' },
+         0: { bd: 'S', fn: '------' },
+         1: { bd: 'S', fn: 'CLCV--' },  // Carrier (CV/CVN)
+         2: { bd: 'S', fn: 'CLCC--' },  // Command ship / cruiser
+         3: { bd: 'S', fn: 'CLCC--' },  // Guided missile cruiser (CG)
+         4: { bd: 'S', fn: 'CLDD--' },  // Guided missile destroyer (DDG)
+         5: { bd: 'S', fn: 'CLDD--' },  // Destroyer (DD)
+         6: { bd: 'S', fn: 'CLFF--' },  // Guided missile frigate (FFG)
+         7: { bd: 'S', fn: 'CPSB--' },  // Light / patrol craft
+         8: { bd: 'S', fn: 'CMMS--' },  // Mine countermeasure
+         9: { bd: 'S', fn: 'CA----' },  // Dock landing ship (LSD/LPD)
+        10: { bd: 'S', fn: 'CALS--' },  // Tank landing ship (LST)
+        11: { bd: 'S', fn: 'CALC--' },  // Landing craft (LCU/LCAC)
+        14: { bd: 'S', fn: 'CPSB--' },  // Hydrofoil
+        16: { bd: 'S', fn: 'NR----' },  // Auxiliary
+        17: { bd: 'S', fn: 'NR----' },  // Auxiliary, merchant marine
+        50: { bd: 'S', fn: 'CLFF--' },  // Frigate (FF, legacy)
+        51: { bd: 'S', fn: 'CL----' },  // Battleship (BB)
+        52: { bd: 'S', fn: 'CLCC--' },  // Heavy cruiser (CA)
+        53: { bd: 'S', fn: 'NTS---' },  // Destroyer tender (AD)
+        54: { bd: 'S', fn: 'CALA--' },  // Amphibious assault ship (LHA/LHD)
+        55: { bd: 'S', fn: 'CA----' },  // Amphibious cargo ship (LKA)
+        56: { bd: 'S', fn: 'CA----' },  // Amphibious transport dock (LPD)
+        57: { bd: 'S', fn: 'NRA---' },  // Ammunition ship (AE)
+        58: { bd: 'S', fn: 'NRO---' },  // Combat stores ship (AFS)
+        59: { bd: 'S', fn: 'CP----' },  // SURTASS surveillance
+        60: { bd: 'S', fn: 'NRO---' },  // Fast combat support (AOE)
+        61: { bd: 'S', fn: 'NR----' },  // Non-combatant ship
+        62: { bd: 'S', fn: 'CPSB--' },  // Coast Guard cutters
+        63: { bd: 'S', fn: 'CPSB--' },  // Coast Guard boats
+      },
+      4: { // Subsurface → U
+        _: { bd: 'U', fn: '------' },
+         0: { bd: 'U', fn: '------' },
+         1: { bd: 'U', fn: 'SNB---' },  // SSBN (Ohio)
+         2: { bd: 'U', fn: 'SNG---' },  // SSGN (converted Ohio)
+         3: { bd: 'U', fn: 'SNA---' },  // SSN (Virginia/Seawolf/LA)
+         4: { bd: 'U', fn: 'SCG---' },  // SSG conventional guided missile
+         5: { bd: 'U', fn: 'SCA---' },  // SS conventional attack
+         6: { bd: 'U', fn: 'SNA---' },  // SSAN nuclear auxiliary
+         7: { bd: 'U', fn: 'SCA---' },  // SSA conventional auxiliary
+      },
+      5: { // Space → P
+        _: { bd: 'P', fn: '------' },
+         0: { bd: 'P', fn: '------' },
+         1: { bd: 'P', fn: 'V-----' },  // Manned space vehicle
+         2: { bd: 'P', fn: 'S-----' },  // Unmanned / satellite
+         3: { bd: 'P', fn: 'L-----' },  // Booster / launch vehicle
+      },
+    },
+    2: { // Munition
+      _: { bd: 'A', fn: 'MFQ---' },
+      1: { _: { bd: 'G', fn: '------' } },  // Land munition
+      2: { _: { bd: 'A', fn: 'MFQ---' } },  // Air munition
+      3: { _: { bd: 'S', fn: '------' } },  // Surface munition
+      4: { _: { bd: 'U', fn: '------' } },  // Subsurface munition
+      5: { _: { bd: 'P', fn: '------' } },  // Space munition
+    },
+    3: { // Life Form
+      _: { bd: 'G', fn: 'UCI---' },
+      1: { // Land
+        _: { bd: 'G', fn: 'UCI---' },
+         0: { bd: 'G', fn: '------' },
+         1: { bd: 'G', fn: 'UCI---' },  // Dismounted infantry (visible)
+         2: { bd: 'G', fn: 'UCI---' },  // Dismounted infantry (non-visible)
+      },
+      2: { // Air
+        _: { bd: 'A', fn: 'MHA---' },
+         1: { bd: 'A', fn: 'MHA---' },  // Parachutist
+      },
+      3: { _: { bd: 'S', fn: '------' } },  // Surface life form
+    },
+    4: { _: { bd: 'Z', fn: '------' } },  // Environmental
+    8: { _: { bd: 'A', fn: 'MFQ---' } },  // Expendable (decoys/sonobuoys)
+    9: { _: { bd: 'G', fn: '------' } },  // Sensor / emitter
   };
+
+  function lookupSidc(kind, domain, category) {
+    const kindNode = SIDC_TREE[kind];
+    if (!kindNode) return null;
+    const domainNode = kindNode[domain];
+    if (!domainNode) return kindNode._ ?? null;
+    return domainNode[category] ?? domainNode._ ?? kindNode._ ?? null;
+  }
 
   function entityToSidc(entity) {
     if (!window.ms) return null;
     const AFF = ['U', 'F', 'H', 'N'];
     const aff = AFF[entity.forceId] ?? 'U';
     const parts = (entity.type || '0.0.0.0.0.0.0').split(/[.\-]/);
-    const kind = +parts[0] || 0;
-    const domain = +parts[1] || 0;
-    const [bd, fn] = SIDC_MAP[`${kind}.${domain}`] || ['Z', '------'];
-    return `S${aff}${bd}P${fn}----*`;
+    const kind     = +parts[0] || 0;
+    const domain   = +parts[1] || 0;
+    // parts[2] = country, intentionally skipped
+    const category = +parts[3] || 0;
+    const entry = lookupSidc(kind, domain, category);
+    if (!entry) return null;
+    return `S${aff}${entry.bd}P${entry.fn}----*`;
   }
 
   function getOrCreateSymbol(sidc) {
