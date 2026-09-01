@@ -157,6 +157,88 @@ const MapView = (() => {
       if (!useTiles) canvas.style.cursor = 'grab';
     });
     canvas.addEventListener('dblclick', () => resetView());
+
+    // Touch: single-finger pan, two-finger pinch-zoom, double-tap reset
+    let touchPinchDist = 0, touchPinchMidX = 0, touchPinchMidY = 0;
+    let lastTapTime = 0;
+
+    function hitTestTouch(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = clientX - rect.left, my = clientY - rect.top;
+      const b = bounds(lastEntities) || WORLD;
+      const { mapW: tMapW, mapH: tMapH, ox: tOx, oy: tOy } = projGeo(b, canvas.width, canvas.height);
+      let best = null, bestDist = 22;
+      for (const ent of lastEntities) {
+        if (!isFinite(ent.lat) || !isFinite(ent.lon)) continue;
+        const px = ((ent.lon - b.minLon) / (b.maxLon - b.minLon) * tMapW + tOx) * zoom + panX;
+        const py = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * tMapH + tOy) * zoom + panY;
+        const d = Math.hypot(px - mx, py - my);
+        if (d < bestDist) { bestDist = d; best = ent; }
+      }
+      if (best && onEntityClick) onEntityClick(best.key);
+    }
+
+    canvas.addEventListener('touchstart', (e) => {
+      if (useTiles) return;
+      e.preventDefault();
+      if (e.touches.length === 1) {
+        dragging = true;
+        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        mouseDownX = lastX; mouseDownY = lastY;
+        touchPinchDist = 0;
+        const now = Date.now();
+        if (now - lastTapTime < 300) resetView();
+        lastTapTime = now;
+      } else if (e.touches.length === 2) {
+        dragging = false;
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        touchPinchDist = Math.hypot(dx, dy);
+        touchPinchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        touchPinchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (useTiles) return;
+      e.preventDefault();
+      if (e.touches.length === 1 && dragging) {
+        panX += e.touches[0].clientX - lastX;
+        panY += e.touches[0].clientY - lastY;
+        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        draw();
+      } else if (e.touches.length === 2 && touchPinchDist > 0) {
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        const newDist = Math.hypot(dx, dy);
+        const factor = newDist / touchPinchDist;
+        const rect = canvas.getBoundingClientRect();
+        const mx = touchPinchMidX - rect.left, my = touchPinchMidY - rect.top;
+        const nz = Math.min(80, Math.max(0.02, zoom * factor));
+        const k = nz / zoom;
+        panX = mx - (mx - panX) * k;
+        panY = my - (my - panY) * k;
+        zoom = nz;
+        touchPinchDist = newDist;
+        touchPinchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        touchPinchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        draw();
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+      if (useTiles) return;
+      e.preventDefault();
+      if (e.touches.length === 0 && dragging) {
+        const t = e.changedTouches[0];
+        if (Math.hypot(t.clientX - mouseDownX, t.clientY - mouseDownY) < 10) hitTestTouch(t.clientX, t.clientY);
+        dragging = false;
+      } else if (e.touches.length === 1) {
+        dragging = true;
+        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        touchPinchDist = 0;
+      }
+    }, { passive: false });
   }
 
   function resetView() {
@@ -291,7 +373,10 @@ const MapView = (() => {
     }
     if (zoom === 1 && panX === 0 && panY === 0) {
       ctx.fillStyle = '#465261';
-      ctx.fillText('scroll to zoom · drag to pan · dbl-click to reset', 4, h - 18);
+      const isTouchDevice = navigator.maxTouchPoints > 0;
+      ctx.fillText(isTouchDevice
+        ? 'pinch to zoom · drag to pan · double-tap to reset'
+        : 'scroll to zoom · drag to pan · dbl-click to reset', 4, h - 18);
     }
   }
 
