@@ -30419,13 +30419,12 @@ function buildFrame(pdu, srcIp, dstIp, srcPort, dstPort) {
   ip.writeUInt16BE(ipChecksum(ip), 10);
   return Buffer.concat([eth, ip, udp, pdu]);
 }
-function exportToPcap(logPath, pcapPath, opts = {}) {
+function exportToPcapBuffer(logPath, opts = {}) {
   const meta = readMeta(logPath) || {};
   const srcIp = opts.srcIp || "10.0.0.1";
   const dstIp = opts.dstIp || meta.multicastGroup || meta.destination || "239.1.2.3";
   const srcPort = opts.srcPort || 3e3;
   const reader = new LogReader(logPath);
-  const out = import_fs2.default.openSync(pcapPath, "w");
   try {
     const gh = Buffer.alloc(24);
     gh.writeUInt32LE(2712847316, 0);
@@ -30433,11 +30432,9 @@ function exportToPcap(logPath, pcapPath, opts = {}) {
     gh.writeUInt16LE(4, 6);
     gh.writeUInt32LE(65535, 16);
     gh.writeUInt32LE(1, 20);
-    import_fs2.default.writeSync(out, gh);
+    const chunks = [gh];
     const startMs = reader.startWallClockMs;
-    let packets = 0;
-    let bytes = 0;
-    let rec;
+    let packets = 0, bytes = 0, rec;
     while ((rec = reader.readNext()) !== null) {
       const frame = buildFrame(rec.pdu, srcIp, dstIp, srcPort, rec.port || 3e3);
       const absMicros = startMs * 1e3 + rec.offsetMicros;
@@ -30446,16 +30443,19 @@ function exportToPcap(logPath, pcapPath, opts = {}) {
       ph.writeUInt32LE(Math.floor(absMicros % 1e6), 4);
       ph.writeUInt32LE(frame.length, 8);
       ph.writeUInt32LE(frame.length, 12);
-      import_fs2.default.writeSync(out, ph);
-      import_fs2.default.writeSync(out, frame);
+      chunks.push(ph, frame);
       packets += 1;
       bytes += frame.length;
     }
-    return { packets, bytes };
+    return { buffer: Buffer.concat(chunks), packets, bytes };
   } finally {
-    import_fs2.default.closeSync(out);
     reader.close();
   }
+}
+function exportToPcap(logPath, pcapPath, opts = {}) {
+  const { buffer, packets, bytes } = exportToPcapBuffer(logPath, opts);
+  import_fs2.default.writeFileSync(pcapPath, buffer);
+  return { packets, bytes };
 }
 
 // src/os-dialog.js
@@ -30569,6 +30569,22 @@ import_fs4.default.mkdirSync(LOG_DIR, { recursive: true });
 var publicDir = import_fs4.default.existsSync(import_path4.default.join(ROOT, "public")) ? import_path4.default.join(ROOT, "public") : import_path4.default.join(__dirname, "../public");
 var app = (0, import_express.default)();
 app.use(import_express.default.static(publicDir));
+app.get("/export-pcap", (req, res) => {
+  const file = import_path4.default.basename(String(req.query.file || ""));
+  if (!file.endsWith(".dislog")) return res.status(400).send("Invalid file");
+  const src = import_path4.default.join(browseDir, file);
+  if (!import_fs4.default.existsSync(src)) return res.status(404).send("File not found");
+  try {
+    const { buffer, packets } = exportToPcapBuffer(src);
+    const pcapName = file.replace(/\.dislog$/, ".pcap");
+    res.setHeader("Content-Type", "application/vnd.tcpdump.pcap");
+    res.setHeader("Content-Disposition", `attachment; filename="${pcapName}"`);
+    res.setHeader("Content-Length", buffer.length);
+    res.end(buffer);
+  } catch (e) {
+    res.status(500).send(String(e.message || e));
+  }
+});
 var server = import_http.default.createServer(app);
 var wss = new import_websocket_server.default({ server });
 var stats = new Stats();

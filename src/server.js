@@ -14,7 +14,7 @@ import { WebSocketServer } from 'ws';
 import { Capture } from './capture.js';
 import { Player } from './player.js';
 import { Stats } from './stats.js';
-import { exportToPcap } from './pcap.js';
+import { exportToPcap, exportToPcapBuffer } from './pcap.js';
 import { readMeta, updateMeta } from './logformat.js';
 import { openBrowser, pickFolder } from './os-dialog.js';
 
@@ -79,6 +79,23 @@ const publicDir = fs.existsSync(path.join(ROOT, 'public'))
 
 const app = express();
 app.use(express.static(publicDir));
+
+app.get('/export-pcap', (req, res) => {
+  const file = path.basename(String(req.query.file || ''));
+  if (!file.endsWith('.dislog')) return res.status(400).send('Invalid file');
+  const src = path.join(browseDir, file);
+  if (!fs.existsSync(src)) return res.status(404).send('File not found');
+  try {
+    const { buffer, packets } = exportToPcapBuffer(src);
+    const pcapName = file.replace(/\.dislog$/, '.pcap');
+    res.setHeader('Content-Type', 'application/vnd.tcpdump.pcap');
+    res.setHeader('Content-Disposition', `attachment; filename="${pcapName}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.end(buffer);
+  } catch (e) {
+    res.status(500).send(String(e.message || e));
+  }
+});
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 

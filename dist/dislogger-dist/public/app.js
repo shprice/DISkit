@@ -179,7 +179,7 @@ function handle(m) {
       setMode('idle');
       toast(`Replay finished (${m.sentCount} PDUs, ${m.loops} loops)`);
       break;
-    case 'pcapExported': toast(`Exported ${m.file} (${m.packets} packets)`); send({ cmd: 'listLogs' }); break;
+    case 'pcapExported': toast(`Exported ${m.file} (${m.packets} packets)`); break;
     case 'versionWarning': {
       const badge = $('verWarnBadge');
       badge.classList.remove('hidden');
@@ -942,7 +942,13 @@ function init() {
   $('repVersionFilter').addEventListener('change', () => sendFiltersIfReplaying());
   $('repSiteIds').addEventListener('input', () => sendFiltersIfReplaying());
   $('repAppIds').addEventListener('input', () => sendFiltersIfReplaying());
-  $('btnExportPcap').onclick = () => $('logSelect').value && send({ cmd: 'exportPcap', file: $('logSelect').value });
+  $('btnExportPcap').onclick = () => {
+    const file = $('logSelect').value;
+    if (!file) return;
+    const a = document.createElement('a');
+    a.href = `/export-pcap?file=${encodeURIComponent(file)}`;
+    a.click();
+  };
 
   // Multicast group inputs are only relevant when the multicast box is ticked.
   const bindMulti = (chk, grp) => {

@@ -42,44 +42,46 @@ function buildFrame(pdu, srcIp, dstIp, srcPort, dstPort) {
   return Buffer.concat([eth, ip, udp, pdu]);
 }
 
-// Returns { packets, bytes }.
-export function exportToPcap(logPath, pcapPath, opts = {}) {
+// Returns { buffer, packets, bytes } — builds the entire PCAP in memory.
+export function exportToPcapBuffer(logPath, opts = {}) {
   const meta = readMeta(logPath) || {};
   const srcIp = opts.srcIp || '10.0.0.1';
   const dstIp = opts.dstIp || meta.multicastGroup || meta.destination || '239.1.2.3';
   const srcPort = opts.srcPort || 3000;
 
   const reader = new LogReader(logPath);
-  const out = fs.openSync(pcapPath, 'w');
   try {
     const gh = Buffer.alloc(24);
-    gh.writeUInt32LE(0xa1b2c3d4, 0); // magic (microsecond resolution)
-    gh.writeUInt16LE(2, 4);          // version major
-    gh.writeUInt16LE(4, 6);          // version minor
-    gh.writeUInt32LE(65535, 16);     // snaplen
-    gh.writeUInt32LE(1, 20);         // DLT_EN10MB
-    fs.writeSync(out, gh);
+    gh.writeUInt32LE(0xa1b2c3d4, 0);
+    gh.writeUInt16LE(2, 4);
+    gh.writeUInt16LE(4, 6);
+    gh.writeUInt32LE(65535, 16);
+    gh.writeUInt32LE(1, 20);
 
+    const chunks = [gh];
     const startMs = reader.startWallClockMs;
-    let packets = 0;
-    let bytes = 0;
-    let rec;
+    let packets = 0, bytes = 0, rec;
     while ((rec = reader.readNext()) !== null) {
       const frame = buildFrame(rec.pdu, srcIp, dstIp, srcPort, rec.port || 3000);
       const absMicros = startMs * 1000 + rec.offsetMicros;
       const ph = Buffer.alloc(16);
-      ph.writeUInt32LE(Math.floor(absMicros / 1e6), 0);   // ts sec
-      ph.writeUInt32LE(Math.floor(absMicros % 1e6), 4);   // ts usec
-      ph.writeUInt32LE(frame.length, 8);                  // incl len
-      ph.writeUInt32LE(frame.length, 12);                 // orig len
-      fs.writeSync(out, ph);
-      fs.writeSync(out, frame);
+      ph.writeUInt32LE(Math.floor(absMicros / 1e6), 0);
+      ph.writeUInt32LE(Math.floor(absMicros % 1e6), 4);
+      ph.writeUInt32LE(frame.length, 8);
+      ph.writeUInt32LE(frame.length, 12);
+      chunks.push(ph, frame);
       packets += 1;
       bytes += frame.length;
     }
-    return { packets, bytes };
+    return { buffer: Buffer.concat(chunks), packets, bytes };
   } finally {
-    fs.closeSync(out);
     reader.close();
   }
+}
+
+// Returns { packets, bytes } — writes PCAP to disk (kept for CLI use).
+export function exportToPcap(logPath, pcapPath, opts = {}) {
+  const { buffer, packets, bytes } = exportToPcapBuffer(logPath, opts);
+  fs.writeFileSync(pcapPath, buffer);
+  return { packets, bytes };
 }
