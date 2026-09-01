@@ -45,9 +45,10 @@ function buildFrame(pdu, srcIp, dstIp, srcPort, dstPort) {
 // Returns { buffer, packets, bytes } — builds the entire PCAP in memory.
 export function exportToPcapBuffer(logPath, opts = {}) {
   const meta = readMeta(logPath) || {};
-  const srcIp = opts.srcIp || '10.0.0.1';
-  const dstIp = opts.dstIp || meta.multicastGroup || meta.destination || '239.1.2.3';
+  const srcIp   = opts.srcIp   || '10.0.0.1';
+  const dstIp   = opts.dstIp   || meta.multicastGroup || meta.destination || '239.1.2.3';
   const srcPort = opts.srcPort || 3000;
+  const dstPortOverride = opts.dstPort || null;
 
   const reader = new LogReader(logPath);
   try {
@@ -62,7 +63,7 @@ export function exportToPcapBuffer(logPath, opts = {}) {
     const startMs = reader.startWallClockMs;
     let packets = 0, bytes = 0, rec;
     while ((rec = reader.readNext()) !== null) {
-      const frame = buildFrame(rec.pdu, srcIp, dstIp, srcPort, rec.port || 3000);
+      const frame = buildFrame(rec.pdu, srcIp, dstIp, srcPort, dstPortOverride || rec.port || 3000);
       const absMicros = startMs * 1000 + rec.offsetMicros;
       const ph = Buffer.alloc(16);
       ph.writeUInt32LE(Math.floor(absMicros / 1e6), 0);

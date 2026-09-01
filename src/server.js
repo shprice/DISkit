@@ -67,6 +67,7 @@ const config = fs.existsSync(configPath)
 
 config.replay = config.replay || {};
 config.replay.destAddress = getLocalBroadcastAddress();
+config.replay.destPort = config.replay.destPort || 3000;
 const logDirSetting = config.logDir || 'logs';
 const LOG_DIR = path.isAbsolute(logDirSetting)
   ? logDirSetting
@@ -86,7 +87,12 @@ app.get('/export-pcap', (req, res) => {
   const src = path.join(browseDir, file);
   if (!fs.existsSync(src)) return res.status(404).send('File not found');
   try {
-    const { buffer, packets } = exportToPcapBuffer(src);
+    const opts = {};
+    const dstIp = String(req.query.dstIp || '').trim();
+    const port  = parseInt(req.query.port, 10);
+    if (dstIp) opts.dstIp = dstIp;
+    if (!isNaN(port) && port > 0) opts.dstPort = port;
+    const { buffer } = exportToPcapBuffer(src, opts);
     const pcapName = file.replace(/\.dislog$/, '.pcap');
     res.setHeader('Content-Type', 'application/vnd.tcpdump.pcap');
     res.setHeader('Content-Disposition', `attachment; filename="${pcapName}"`);

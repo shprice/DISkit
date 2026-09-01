@@ -203,7 +203,7 @@ function applyConfig(c) {
   }
   sel.value = addr;
   $('repDest').value = c.replay.destAddress;
-  $('repPort').value = c.replay.destPort;
+  $('repPort').value = c.replay.destPort || 3000;
 }
 
 function setMode(mode) {
@@ -945,8 +945,10 @@ function init() {
   $('btnExportPcap').onclick = () => {
     const file = $('logSelect').value;
     if (!file) return;
+    const dstIp = $('repMulti').checked ? $('repGroup').value : $('repDest').value;
+    const port  = $('repPort').value || 3000;
     const a = document.createElement('a');
-    a.href = `/export-pcap?file=${encodeURIComponent(file)}`;
+    a.href = `/export-pcap?file=${encodeURIComponent(file)}&dstIp=${encodeURIComponent(dstIp)}&port=${encodeURIComponent(port)}`;
     a.download = file.replace(/\.dislog$/, '.pcap');
     document.body.appendChild(a);
     a.click();

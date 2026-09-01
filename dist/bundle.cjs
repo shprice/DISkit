@@ -30424,6 +30424,7 @@ function exportToPcapBuffer(logPath, opts = {}) {
   const srcIp = opts.srcIp || "10.0.0.1";
   const dstIp = opts.dstIp || meta.multicastGroup || meta.destination || "239.1.2.3";
   const srcPort = opts.srcPort || 3e3;
+  const dstPortOverride = opts.dstPort || null;
   const reader = new LogReader(logPath);
   try {
     const gh = Buffer.alloc(24);
@@ -30436,7 +30437,7 @@ function exportToPcapBuffer(logPath, opts = {}) {
     const startMs = reader.startWallClockMs;
     let packets = 0, bytes = 0, rec;
     while ((rec = reader.readNext()) !== null) {
-      const frame = buildFrame(rec.pdu, srcIp, dstIp, srcPort, rec.port || 3e3);
+      const frame = buildFrame(rec.pdu, srcIp, dstIp, srcPort, dstPortOverride || rec.port || 3e3);
       const absMicros = startMs * 1e3 + rec.offsetMicros;
       const ph = Buffer.alloc(16);
       ph.writeUInt32LE(Math.floor(absMicros / 1e6), 0);
@@ -30563,6 +30564,7 @@ var configPath = import_fs4.default.existsSync(import_path4.default.join(ROOT, "
 var config = import_fs4.default.existsSync(configPath) ? JSON.parse(import_fs4.default.readFileSync(configPath, "utf8")) : { web: { port: 8080, host: "0.0.0.0" }, capture: { port: 3e3, multicastGroup: "239.1.2.3", bindAddress: "0.0.0.0" } };
 config.replay = config.replay || {};
 config.replay.destAddress = getLocalBroadcastAddress();
+config.replay.destPort = config.replay.destPort || 3e3;
 var logDirSetting = config.logDir || "logs";
 var LOG_DIR = import_path4.default.isAbsolute(logDirSetting) ? logDirSetting : import_path4.default.resolve(ROOT, logDirSetting);
 import_fs4.default.mkdirSync(LOG_DIR, { recursive: true });
@@ -30575,7 +30577,12 @@ app.get("/export-pcap", (req, res) => {
   const src = import_path4.default.join(browseDir, file);
   if (!import_fs4.default.existsSync(src)) return res.status(404).send("File not found");
   try {
-    const { buffer, packets } = exportToPcapBuffer(src);
+    const opts = {};
+    const dstIp = String(req.query.dstIp || "").trim();
+    const port = parseInt(req.query.port, 10);
+    if (dstIp) opts.dstIp = dstIp;
+    if (!isNaN(port) && port > 0) opts.dstPort = port;
+    const { buffer } = exportToPcapBuffer(src, opts);
     const pcapName = file.replace(/\.dislog$/, ".pcap");
     res.setHeader("Content-Type", "application/vnd.tcpdump.pcap");
     res.setHeader("Content-Disposition", `attachment; filename="${pcapName}"`);
