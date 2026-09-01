@@ -29013,6 +29013,7 @@ var require_adm_zip = __commonJS({
 var server_exports = {};
 __export(server_exports, {
   getLocalBroadcastAddress: () => getLocalBroadcastAddress,
+  getLocalIpAddress: () => getLocalIpAddress,
   getNetworkAdapters: () => getNetworkAdapters
 });
 module.exports = __toCommonJS(server_exports);
@@ -30544,6 +30545,17 @@ function getLocalBroadcastAddress() {
   }
   return "255.255.255.255";
 }
+function getLocalIpAddress() {
+  const interfaces = import_os3.default.networkInterfaces();
+  for (const addrs of Object.values(interfaces)) {
+    for (const iface of addrs || []) {
+      if (iface.family === "IPv4" && !iface.internal && !iface.address.startsWith("169.254.")) {
+        return iface.address;
+      }
+    }
+  }
+  return "127.0.0.1";
+}
 function getNetworkAdapters() {
   const adapters = [{ label: "All Interfaces", address: "0.0.0.0" }];
   const interfaces = import_os3.default.networkInterfaces();
@@ -30580,6 +30592,7 @@ app.get("/export-pcap", (req, res) => {
     const opts = {};
     const dstIp = String(req.query.dstIp || "").trim();
     const port = parseInt(req.query.port, 10);
+    opts.srcIp = getLocalIpAddress();
     if (dstIp) opts.dstIp = dstIp;
     if (!isNaN(port) && port > 0) opts.dstPort = port;
     const { buffer } = exportToPcapBuffer(src, opts);
@@ -30950,6 +30963,7 @@ process.on("SIGINT", () => {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   getLocalBroadcastAddress,
+  getLocalIpAddress,
   getNetworkAdapters
 });
 /*! Bundled license information:
