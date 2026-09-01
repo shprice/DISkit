@@ -4,12 +4,12 @@
 
 import { pduTypeName } from './dis/enums.js';
 
-const ENTITY_TTL_MS = 12000;   // drop entities not heard from for this long
 const EMITTER_TTL_MS = 15000;
 const SIGNAL_TTL_MS  = 30000;
 
 export class Stats {
-  constructor() {
+  constructor({ entityTimeoutSecs = 5 } = {}) {
+    this.entityTtlMs = Math.max(entityTimeoutSecs * 1000 * 3, 12000); // 3× timeout, min 12 s
     this.reset();
   }
 
@@ -136,7 +136,7 @@ export class Stats {
   ageOut() {
     const now = Date.now();
     for (const [k, e] of this.entities) {
-      if (now - e.lastSeen > ENTITY_TTL_MS) this.entities.delete(k);
+      if (now - e.lastSeen > this.entityTtlMs) this.entities.delete(k);
     }
     for (const [k, e] of this.emitters) {
       if (now - e.lastSeen > EMITTER_TTL_MS) this.emitters.delete(k);

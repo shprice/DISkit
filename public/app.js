@@ -62,6 +62,9 @@ let replayDurationMs = 0;     // duration of the selected replay log
 let selectedKey = null;
 let selectedType = null;      // 'entity' | 'emitter'
 let lastStats = null;
+let lastDetailsSerial = null; // skip detail re-render when data is unchanged
+const sidcSvgCache = new Map(); // SIDC string → SVG string (keyed by full 20-char SIDC)
+let entityTimeoutMs = 5000;   // from config.entityTimeoutSecs; amber at ½, red at full
 
 function $(id) { return document.getElementById(id); }
 
@@ -192,6 +195,7 @@ function handle(m) {
 
 function applyConfig(c) {
   if (!c) return;
+  if (c.entityTimeoutSecs) entityTimeoutMs = c.entityTimeoutSecs * 1000;
   $('capPort').value = c.capture.port;
   $('capGroup').value = c.capture.multicastGroup;
   const sel = $('capBind');
@@ -346,13 +350,31 @@ function renderStats(s) {
   drawPie('appPie',  (s.apps  || []).map(x => ({ count: x.count, label: `App ${x.id}` })), 'Apps', (s.apps||[]).length);
 
   const eb = $('entityTable').querySelector('tbody');
-  eb.innerHTML = s.entities.map((e) => `
-    <tr data-key="${escapeHtml(e.key)}">
-      <td><span class="dot f${e.forceId}"></span>${escapeHtml(e.marking) || ''}</td>
+  const nowMs = Date.now();
+  eb.innerHTML = s.entities.map((e) => {
+    let iconHtml;
+    if (window.ms && window.MapView?.entityToSidc) {
+      try {
+        const sidc = window.MapView.entityToSidc(e);
+        if (sidc) {
+          if (!sidcSvgCache.has(sidc)) sidcSvgCache.set(sidc, new window.ms.Symbol(sidc, { size: 20 }).asSVG());
+          iconHtml = `<span class="entity-list-icon">${sidcSvgCache.get(sidc)}</span>`;
+        }
+      } catch {}
+    }
+    iconHtml ??= `<span class="dot f${e.forceId}"></span>`;
+    const ageMs = nowMs - (e.lastSeen || 0);
+    const staleClass = ageMs >= entityTimeoutMs     ? ' stale-red'
+                     : ageMs >= entityTimeoutMs / 2 ? ' stale-amber'
+                     : '';
+    return `
+    <tr data-key="${escapeHtml(e.key)}"${staleClass ? ` class="${staleClass.trim()}"` : ''}>
+      <td>${iconHtml}${escapeHtml(e.marking) || ''}</td>
       <td>${escapeHtml(e.force) || ''}</td><td>${escapeHtml(e.kind) || ''}</td>
       <td>${fnum(e.lat, 4)}</td><td>${fnum(e.lon, 4)}</td>
       <td>${fnum(e.alt, 0)}</td><td>${fnum(e.heading, 0)}</td><td>${fnum(e.speed, 0)}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   const mb = $('emitterTable').querySelector('tbody');
   mb.innerHTML = s.emitters.map((r) => `
@@ -425,6 +447,7 @@ function fnum(v, d) { return (v === undefined || v === null || !isFinite(v)) ? '
 function selectItem(key, type, data) {
   selectedKey = key;
   selectedType = type;
+  lastDetailsSerial = null; // force full re-render on new selection
   renderDetails(data);
   applyTableSelection();
   window.MapView.setSelected(type === 'entity' ? key : null);
@@ -484,12 +507,24 @@ function decodeCapabilities(caps) {
 
 function renderDetails(data) {
   const el = $('detailsContent');
-  if (!data) { el.innerHTML = '<span class="hint">Select an entity or emitter</span>'; return; }
+  if (!data) {
+    lastDetailsSerial = null;
+    el.innerHTML = '<span class="hint">Select an entity or emitter</span>';
+    return;
+  }
+  // Don't interrupt an active text selection
+  if (document.getSelection().type === 'Range') return;
+  // Skip if content hasn't changed. Excludes lastSeen so a heartbeat-only update doesn't
+  // rebuild the pane and cause the "Xs ago" field to flash.
+  const serial = `${selectedKey}|${selectedType}|${data.lat||''}|${data.lon||''}|${data.alt||''}|${data.heading||''}|${data.speed||''}`;
+  if (serial === lastDetailsSerial) return;
+  lastDetailsSerial = serial;
 
   if (selectedType === 'entity') {
     const e = data;
     const typeLabel = lookupEntityType(e.type);
     const sidc = window.MapView?.entityToSidc?.(e);
+    const sidcLabel = window.MapView?.entityToSidcLabel?.(e);
     let iconHtml = '';
     if (sidc && window.ms) {
       try { iconHtml = `<div class="detail-symbol">${new window.ms.Symbol(sidc, { size: 48 }).asSVG()}</div>`; } catch {}
@@ -506,6 +541,10 @@ function renderDetails(data) {
     const hasOri = e.orientation;
     const hasDR  = e.drAlgorithm != null;
     const ls = e.lastSeen ? new Date(e.lastSeen).toTimeString().slice(0,8) : '—';
+    const lsTs = e.lastSeen || 0;
+    const lsAgeMs = lsTs ? Date.now() - lsTs : 0;
+    const lsAgoSecs = lsTs ? Math.round(lsAgeMs / 1000) : 0;
+    const lsAgoClass = lsAgeMs >= entityTimeoutMs ? ' stale-red' : lsAgeMs >= entityTimeoutMs / 2 ? ' stale-amber' : '';
     let climbRate = null;
     if (hasVel && isFinite(e.lat) && isFinite(e.lon)) {
       const lat = e.lat * Math.PI / 180, lon = e.lon * Math.PI / 180;
@@ -516,12 +555,14 @@ function renderDetails(data) {
     el.innerHTML = `
       ${iconHtml}
       <dl class="detail-list">
+        <dt>Entity ID</dt><dd>${escapeHtml(e.key||'—')}</dd>
         <dt class="detail-section">Identity</dt>
         <dt>Marking</dt><dd>${escapeHtml(e.marking||'—')}</dd>
         <dt>Charset</dt><dd>${escapeHtml(MARKING_CHARSET[e.markingCharset] || (e.markingCharset != null ? String(e.markingCharset) : '—'))}</dd>
         <dt>Force</dt><dd>${escapeHtml(e.force||'—')}</dd>
         <dt>SIDC</dt><dd>${sidc||'—'}</dd>
-        <dt>Last seen</dt><dd>${ls}</dd>
+        ${sidcLabel ? `<dt>Symbol</dt><dd>${escapeHtml(sidcLabel)}</dd>` : ''}
+        <dt>Last seen</dt><dd>${ls}${lsTs ? ` <span id="details-ago" data-ts="${lsTs}" class="ago-timer${lsAgoClass}">· ${lsAgoSecs}s ago</span>` : ''}</dd>
 
         <dt class="detail-section">Type</dt>
         <dt>Type code</dt><dd>${escapeHtml(e.type||'—')}</dd>
@@ -576,13 +617,26 @@ function renderDetails(data) {
 
         ${e.articulationParams?.length ? `
         <dt class="detail-section">Articulation (${e.articulationParams.length})</dt>
-        ${e.articulationParams.map((a,i) => `
-          <dt>#${i+1} Designator</dt><dd>${a.typeDesignator === 0 ? 'Articulated' : 'Attached'}</dd>
-          <dt>#${i+1} Param type</dt><dd>0x${(a.parameterType>>>0).toString(16).toUpperCase()}</dd>
-          <dt>#${i+1} Value</dt><dd>${isFinite(a.parameterValue) ? a.parameterValue.toFixed(4) : '—'}</dd>`).join('')}` : ''}
+        ${e.articulationParams.map((a,i) => {
+          const isArticulated = a.typeDesignator === 0;
+          const typeClass = (a.parameterType >>> 5);
+          const metric = a.parameterType & 0x1f;
+          const METRIC = ['Other','Position','Position Rate','Extension','Extension Rate',
+            'X','X Rate','Y','Y Rate','Z','Z Rate',
+            'Azimuth','Azimuth Rate','Elevation','Elevation Rate','Rotation','Rotation Rate'];
+          const metricLabel = METRIC[metric] || `${metric}`;
+          return `
+          <dt class="detail-subsection">Param #${i+1}</dt>
+          <dt>Designator</dt><dd>${isArticulated ? 'Articulated' : 'Attached'}</dd>
+          <dt>Change</dt><dd>${a.changeIndicator ?? '—'}</dd>
+          <dt>Attachment ID</dt><dd>${a.attachmentId ?? '—'}</dd>
+          ${isArticulated ? `
+          <dt>Type class</dt><dd>${typeClass}</dd>
+          <dt>Metric</dt><dd>${metricLabel}</dd>` : `
+          <dt>Param type</dt><dd>0x${(a.parameterType>>>0).toString(16).toUpperCase().padStart(8,'0')}</dd>`}
+          <dt>Value</dt><dd>${isFinite(a.parameterValue) ? a.parameterValue.toFixed(4) : '—'}</dd>`;
+        }).join('')}` : ''}
 
-        <dt class="detail-section">IDs</dt>
-        <dt>Entity ID</dt><dd>${escapeHtml(e.key||'—')}</dd>
       </dl>`;
 
   } else if (selectedType === 'emitter') {
@@ -1047,6 +1101,21 @@ function init() {
   }));
 
   $('symScale').addEventListener('input', () => window.MapView.setSymbolSize(+$('symScale').value));
+
+  // Tick the "X s ago" display in the details pane every second
+  setInterval(() => {
+    const agoEl = document.getElementById('details-ago');
+    if (!agoEl) return;
+    const ts = parseInt(agoEl.dataset.ts, 10);
+    if (!ts) return;
+    const ageMs = Date.now() - ts;
+    const ageSecs = Math.round(ageMs / 1000);
+    agoEl.textContent = `· ${ageSecs}s ago`;
+    agoEl.className = 'ago-timer' +
+      (ageMs >= entityTimeoutMs     ? ' stale-red'
+     : ageMs >= entityTimeoutMs / 2 ? ' stale-amber'
+     : '');
+  }, 1000);
 
   connect();
 }

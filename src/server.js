@@ -119,7 +119,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // ---- Shared state ----------------------------------------------------------
-const stats = new Stats();
+const stats = new Stats({ entityTimeoutSecs: config.entityTimeoutSecs ?? 5 });
 let capture = null;
 let player = null;
 let mode = 'idle'; // idle | capturing | replaying

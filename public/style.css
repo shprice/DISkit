@@ -36,6 +36,7 @@
 body {
   margin: 0; background: var(--bg); color: var(--fg);
   font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
 }
 header {
   display: flex; align-items: center; gap: 12px;
@@ -61,16 +62,18 @@ header .sub { color: var(--muted); }
 main {
   display: grid; gap: 12px; padding: 12px; padding-bottom: 48px;
   grid-template-columns: 320px 1fr 1fr;
+  grid-template-rows: auto 1fr;
   grid-template-areas:
     "control stats    map"
     "control monitor  details";
+  flex: 1; min-height: 0; overflow: hidden;
 }
 .panel {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 12px; min-height: 60px;
 }
 .panel h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-.control { grid-area: control; }
+.control { grid-area: control; overflow-y: auto; min-height: 0; }
 .stats { grid-area: stats; }
 
 .tabs { display: flex; gap: 4px; margin: -4px -4px 0; border-bottom: 1px solid var(--line); }
@@ -181,7 +184,7 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 #mapCanvas { background: #0a1f1a; }
 .hidden { display: none !important; }
 
-.monitor { grid-area: monitor; display: flex; flex-direction: column; min-height: 0; }
+.monitor { grid-area: monitor; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .monitor > h3 { flex-shrink: 0; margin-bottom: 4px; }
 .ptabs { display: flex; gap: 0; margin: 0 -12px 0; border-bottom: 1px solid var(--line); }
 .ptab {
@@ -191,14 +194,14 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 }
 .ptab:hover { color: var(--fg); background: var(--panel2); }
 .ptab.active { color: var(--fg); background: var(--panel2); border-bottom-color: var(--accent); }
-.ptabbody { padding-top: 8px; flex: 1; min-height: 0; }
+.ptabbody { padding-top: 8px; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .ptabbody.hidden { display: none; }
 
 .sel-table tbody tr { cursor: pointer; }
 .sel-table tbody tr:hover { background: rgba(255,255,255,0.04); }
 .sel-table tbody tr.selected { background: rgba(47,129,247,0.15); outline: none; }
 
-.details { grid-area: details; display: flex; flex-direction: column; }
+.details { grid-area: details; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .details > h3 { flex-shrink: 0; }
 .details-wrap { flex: 1; margin-top: 4px; overflow-y: auto; min-height: 0; }
 .detail-list { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 3px 10px; font-size: 11px; }
@@ -210,17 +213,30 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
   padding: 6px 0 2px; margin-top: 4px; border-top: 1px solid var(--line);
 }
 .detail-section:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+.detail-subsection {
+  grid-column: 1 / -1; font-size: 10px; color: var(--muted);
+  padding: 3px 0 1px; margin-top: 3px; border-top: 1px dashed var(--line);
+}
 .detail-symbol { text-align: center; margin-bottom: 6px; }
 .enum-type { color: var(--accent); }
 .mil-icon { background: none !important; border: none !important; }
 
-.tablewrap { max-height: 220px; overflow: auto; }
+.tablewrap { flex: 1; overflow: auto; min-height: 0; }
 table { width: 100%; border-collapse: collapse; font-size: 11px; }
 th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
 .f1 { background: var(--friendly); } .f2 { background: var(--opposing); }
 .f3 { background: var(--neutral); } .f0 { background: var(--other); }
+.entity-list-icon { display: inline-block; vertical-align: middle; margin-right: 4px; width: 24px; height: 24px; overflow: hidden; }
+.entity-list-icon svg { display: block; width: 24px; height: 24px; }
+tr.stale-amber td:first-child { color: var(--amber); }
+tr.stale-amber { background: rgba(210, 153, 34, 0.07); }
+tr.stale-red td:first-child { color: var(--red); }
+tr.stale-red { background: rgba(248, 81, 73, 0.07); }
+.ago-timer { color: var(--muted); margin-left: 2px; }
+.ago-timer.stale-amber { color: var(--amber); }
+.ago-timer.stale-red { color: var(--red); }
 
 /* Console drawer — fixed bottom panel, tab slides it up */
 .console-drawer {

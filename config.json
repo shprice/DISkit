@@ -14,5 +14,6 @@
     "multicast": false,
     "ttl": 16
   },
-  "logDir": "logs"
+  "logDir": "logs",
+  "entityTimeoutSecs": 5
 }
