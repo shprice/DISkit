@@ -121,7 +121,19 @@ function decodeEntityState(buf) {
     marking,
     capabilities,
     articulationParams,
-    headingDeg: ((((orientation.psi * 180) / Math.PI) % 360 + 360) % 360),
+    // Convert ECEF Euler angles to a true compass heading.
+    // Full Z-Y-X rotation: forward body vector = first col of Rz(psi)*Ry(theta)*Rx(phi).
+    // phi (roll) cancels out; theta (pitch) tilts the vector out of the horizontal plane.
+    // Project forward vector onto local ENU then take atan2(east, north).
+    headingDeg: (() => {
+      const latRad = geo.lat * Math.PI / 180;
+      const lonRad = geo.lon * Math.PI / 180;
+      const psi = orientation.psi, theta = orientation.theta;
+      const cT = Math.cos(theta), sT = Math.sin(theta);
+      const east  = cT * Math.sin(psi - lonRad);
+      const north = -Math.sin(latRad) * cT * Math.cos(psi - lonRad) - Math.cos(latRad) * sT;
+      return (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+    })(),
   };
 }
 

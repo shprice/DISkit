@@ -21,23 +21,55 @@
   <main>
     <section class="panel control">
       <div class="tabs">
-        <button class="tab active" data-tab="capture">Log</button>
-        <button class="tab" data-tab="replay">Replay</button>
+        <button class="tab active" data-tab="view">View <span id="viewFilterIcon" class="tab-filter-icon hidden"></span></button>
+        <button class="tab" data-tab="capture">Log</button>
+        <button class="tab" data-tab="replay">Replay <span id="replayFilterIcon" class="tab-filter-icon hidden"></span></button>
       </div>
 
-      <div class="tabbody" id="tab-capture">
-        <div class="row">
-          <label>Port <input id="capPort" type="number" value="3000" /></label>
-          <label class="chk"><input id="capMulti" type="checkbox" /> Multicast</label>
-          <label class="grow">Group <input id="capGroup" type="text" value="239.1.2.3" disabled /></label>
-        </div>
-        <div class="row">
-          <label class="grow">Bind Address <select id="capBind"><option value="0.0.0.0">All Interfaces</option></select></label>
-        </div>
-        <div class="row">
-          <button id="btnListen" class="primary">Start Listening</button>
-          <button id="btnStop">Stop</button>
-        </div>
+      <div class="tabbody" id="tab-view">
+        <fieldset>
+          <legend>Connection</legend>
+          <div class="row">
+            <label>Port <input id="capPort" type="number" value="3000" /></label>
+            <span class="sw-inline"><label for="capMulti">Multicast</label><label class="sw"><input id="capMulti" type="checkbox"><span class="sw-track"></span></label></span>
+            <label class="grow">Group <input id="capGroup" type="text" value="239.1.2.3" disabled /></label>
+          </div>
+          <div class="row">
+            <label class="grow">Bind Address <select id="capBind"><option value="0.0.0.0">All Interfaces</option></select></label>
+          </div>
+          <div class="row">
+            <button id="btnListen" class="primary">Start Listening</button>
+            <button id="btnStop">Stop</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>View Filters</legend>
+          <span id="viewFilterPill" class="filter-pill hidden">Capture Filtered</span>
+          <div class="row">
+            <label class="grow">PDU types <div id="recFilter" class="multiselect"></div></label>
+            <label class="grow">DIS versions <div id="recVersionFilter" class="multiselect"></div></label>
+          </div>
+          <div class="row">
+            <label class="grow">Site IDs <input id="recSiteIds" type="text" placeholder="blank = all, e.g. 1,2" /></label>
+            <label class="grow">App IDs <input id="recAppIds" type="text" placeholder="blank = all, e.g. 1" /></label>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Site &amp; App Names</legend>
+          <table class="names-table" id="siteAppNamesTable">
+            <thead><tr><th>Type</th><th>ID</th><th>Name</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="row">
+            <select id="nameType"><option value="site">Site</option><option value="app">App</option></select>
+            <input type="number" id="nameId" placeholder="ID" min="0" max="65535" style="width:72px">
+            <input type="text" id="nameLabel" placeholder="Name" style="flex:1">
+            <button id="btnAddName" class="primary">Add</button>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="tabbody hidden" id="tab-capture">
         <fieldset>
           <legend>Recording</legend>
           <div class="row">
@@ -46,14 +78,6 @@
           </div>
           <div class="row">
             <label class="grow">File <input id="recName" type="text" placeholder="(auto timestamp).dislog" /></label>
-          </div>
-          <div class="row">
-            <label class="grow">PDU types <div id="recFilter" class="multiselect"></div></label>
-            <label class="grow">DIS versions <div id="recVersionFilter" class="multiselect"></div></label>
-          </div>
-          <div class="row">
-            <label class="grow">Site IDs <input id="recSiteIds" type="text" placeholder="blank = all, e.g. 1,2" /></label>
-            <label class="grow">App IDs <input id="recAppIds" type="text" placeholder="blank = all, e.g. 1" /></label>
           </div>
           <div class="row">
             <button id="btnRecord" class="rec">● Record</button>
@@ -88,7 +112,7 @@
           <label>Port <input id="repPort" type="number" value="3000" /></label>
         </div>
         <div class="row">
-          <label class="chk"><input id="repMulti" type="checkbox" /> Multicast</label>
+          <span class="sw-inline"><label for="repMulti">Multicast</label><label class="sw"><input id="repMulti" type="checkbox"><span class="sw-track"></span></label></span>
           <label class="grow">Group <input id="repGroup" type="text" value="239.1.2.3" disabled /></label>
         </div>
         <div class="row">
@@ -99,7 +123,7 @@
               <option>100</option><option>1000</option>
             </select>x
           </label>
-          <label class="chk"><input id="repLoop" type="checkbox" /> Loop</label>
+          <span class="sw-inline"><label for="repLoop">Loop</label><label class="sw"><input id="repLoop" type="checkbox"><span class="sw-track"></span></label></span>
         </div>
         <div class="row">
           <label class="grow">Replay as version
@@ -129,6 +153,7 @@
         <div id="progText" class="hint"></div>
         <fieldset>
           <legend>Replay filters</legend>
+          <span id="replayFilterPill" class="filter-pill hidden">Playback Filtered</span>
           <div class="row">
             <label class="grow">PDU types <div id="repFilter" class="multiselect"></div></label>
             <label class="grow">DIS versions <div id="repVersionFilter" class="multiselect"></div></label>
@@ -147,11 +172,14 @@
     <section class="panel stats">
       <h3>PDU Stats</h3>
       <div class="metrics">
-        <div class="metric"><span id="mPdus">0</span><label>PDUs</label></div>
-        <div class="metric"><span id="mRate">0</span><label>PDU/s</label></div>
+        <div class="metric"><span id="mPdus">0</span><label>PDUs Received</label></div>
+        <div class="metric metric-graph"><span id="mRate">0</span><label>PDU/s</label><canvas id="pduRateGraph" height="28"></canvas></div>
         <div class="metric"><span id="mEntities">0</span><label>Entities</label></div>
-        <div class="metric"><span id="mEmitters">0</span><label>Emitters</label></div>
-        <div class="metric"><span id="mBytes">0 KB</span><label>Data Throughput</label></div>
+        <div class="metric metric-graph">
+          <span id="mDataRate">0.000</span><label id="mDataRateUnit">kb/s</label>
+          <canvas id="dataRateGraph" height="28"></canvas>
+        </div>
+        <div class="metric"><span id="mBytes">0 KB</span><label>Data Received</label></div>
       </div>
       <div class="pietriptych">
         <div class="pieunit">
@@ -172,24 +200,73 @@
     <section class="panel map">
       <div class="maphead">
         <h3>Entity map</h3>
-        <label class="chk"><input id="mapTiles" type="checkbox" /> Online tiles</label>
-        <button id="mapReset" class="mini" title="Reset zoom/pan">Reset view</button>
-        <button id="mapExpand" class="mini" title="Expand map">⛶</button>
         <span id="mapInfo" class="hint"></span>
+        <div class="maphead-actions">
+          <button id="mapReset" class="mini" title="Reset zoom/pan">Reset view</button>
+          <button id="mapExpand" class="mini" title="Fullscreen">⛶</button>
+          <div class="map-settings-wrap">
+            <button id="mapSettings" class="mini">⚙</button>
+            <div id="mapSettingsPopup" class="map-settings-popup hidden">
+              <div class="sw-field">
+                <label for="mapTiles">Online tiles</label>
+                <label class="sw"><input id="mapTiles" type="checkbox"><span class="sw-track"></span></label>
+              </div>
+              <div class="sw-field">
+                <label for="mapFollow">Follow selection</label>
+                <label class="sw"><input id="mapFollow" type="checkbox"><span class="sw-track"></span></label>
+              </div>
+              <div class="sw-field">
+                <label for="mapDirections">Show Heading</label>
+                <label class="sw"><input id="mapDirections" type="checkbox"><span class="sw-track"></span></label>
+              </div>
+              <div class="sw-field">
+                <label for="mapDR">DR position</label>
+                <label class="sw"><input id="mapDR" type="checkbox"><span class="sw-track"></span></label>
+              </div>
+              <div class="sw-field" id="mapBothLbl">
+                <label for="mapBoth">Show both</label>
+                <label class="sw"><input id="mapBoth" type="checkbox"><span class="sw-track"></span></label>
+              </div>
+              <div class="sw-field">
+                <label for="mapHistory">History trail</label>
+                <label class="sw"><input id="mapHistory" type="checkbox"><span class="sw-track"></span></label>
+              </div>
+              <div class="sw-field sw-range" id="historyLengthRow" style="display:none">
+                <label for="historyLength">Trail length</label>
+                <input type="range" id="historyLength" min="10" max="500" value="100">
+              </div>
+              <div class="sw-field" id="historyColorRow" style="display:none">
+                <label for="historyColor">Trail color</label>
+                <input type="color" id="historyColor" value="#f0c674" style="width:40px;height:24px;padding:1px;cursor:pointer">
+              </div>
+              <div class="map-settings-sep"></div>
+              <div class="sw-field sw-range">
+                <label for="symScale">Symbol size</label>
+                <input type="range" id="symScale" min="12" max="60" value="28">
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
         <div id="leafletMap" class="hidden"></div>
-        <div class="sym-scale-ctrl">
-          <span class="sym-scale-lbl">+</span>
-          <input type="range" id="symScale" min="12" max="60" value="28" orient="vertical" title="Symbol size" />
-          <span class="sym-scale-lbl">−</span>
-        </div>
       </div>
     </section>
 
     <section class="panel monitor">
-      <h3>PDU Monitor</h3>
+      <div class="monitor-head">
+        <h3>PDU Monitor</h3>
+        <div class="monitor-settings-wrap">
+          <button id="monitorSettings" class="mini">⚙</button>
+          <div id="monitorSettingsPopup" class="map-settings-popup hidden">
+            <div class="sw-field sw-range">
+              <label for="entityTimeoutSecs" title="Seconds before an entity is considered stale">Entity timeout (s)</label>
+              <input type="number" id="entityTimeoutSecs" min="1" max="3600" value="10" style="width:64px">
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="ptabs">
         <button class="ptab active" data-ptab="entities">Entities</button>
         <button class="ptab" data-ptab="emitters">Emissions</button>
@@ -201,7 +278,7 @@
       <div class="ptabbody" id="ptab-entities">
         <div class="tablewrap">
           <table id="entityTable" class="sel-table">
-            <thead><tr><th>Marking</th><th>Force</th><th>Kind</th><th>Lat</th><th>Lon</th><th>Alt</th><th>Hdg</th><th>Spd</th></tr></thead>
+            <thead><tr><th>Marking</th><th>Force</th><th>Kind</th><th>Site</th><th>App</th><th>Alt</th><th>Hdg</th><th>Spd</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>

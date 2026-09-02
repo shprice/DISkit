@@ -29347,7 +29347,19 @@ function decodeEntityState(buf) {
     marking,
     capabilities,
     articulationParams,
-    headingDeg: (orientation.psi * 180 / Math.PI % 360 + 360) % 360
+    // Convert ECEF Euler angles to a true compass heading.
+    // Full Z-Y-X rotation: forward body vector = first col of Rz(psi)*Ry(theta)*Rx(phi).
+    // phi (roll) cancels out; theta (pitch) tilts the vector out of the horizontal plane.
+    // Project forward vector onto local ENU then take atan2(east, north).
+    headingDeg: (() => {
+      const latRad = geo.lat * Math.PI / 180;
+      const lonRad = geo.lon * Math.PI / 180;
+      const psi = orientation.psi, theta = orientation.theta;
+      const cT = Math.cos(theta), sT = Math.sin(theta);
+      const east = cT * Math.sin(psi - lonRad);
+      const north = -Math.sin(latRad) * cT * Math.cos(psi - lonRad) - Math.cos(latRad) * sT;
+      return (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+    })()
   };
 }
 function decodeFire(buf) {
@@ -30190,11 +30202,11 @@ var Player = class {
 };
 
 // src/stats.js
-var ENTITY_TTL_MS = 12e3;
 var EMITTER_TTL_MS = 15e3;
 var SIGNAL_TTL_MS = 3e4;
 var Stats = class {
-  constructor() {
+  constructor({ entityTimeoutSecs = 5 } = {}) {
+    this.entityTtlMs = Math.max(entityTimeoutSecs * 1e3 * 3, 12e3);
     this.reset();
   }
   reset() {
@@ -30212,6 +30224,7 @@ var Stats = class {
     this.signalStates = /* @__PURE__ */ new Map();
     this.startTime = Date.now();
     this.rateWindow = [];
+    this.byteRateWindow = [];
   }
   // header: parsed common header. body: decoded body (may be null).
   ingest(header, body, byteLen, rawBuf) {
@@ -30228,10 +30241,14 @@ var Stats = class {
     }
     this.rateWindow.push(now);
     if (this.rateWindow.length > 2e3) this.rateWindow.shift();
+    this.byteRateWindow.push({ t: now, b: byteLen || 0 });
+    if (this.byteRateWindow.length > 5e3) this.byteRateWindow.shift();
     if (header.pduType === 1 && body && body.entityIdKey) {
       this.entities.set(body.entityIdKey, {
         key: body.entityIdKey,
         marking: body.marking || body.entityIdKey,
+        siteId: body.entityId?.site,
+        appId: body.entityId?.application,
         force: body.forceName,
         forceId: body.forceId,
         type: body.entityTypeString,
@@ -30293,7 +30310,7 @@ var Stats = class {
         entityKey: body.entityIdKey,
         radioId: body.radioId,
         txState: body.txState,
-        txStateName: body.txState === 1 ? "On" : "Off",
+        txStateName: body.txState === 2 ? "Transmitting" : body.txState === 1 ? "On (idle)" : "Off",
         frequency: body.frequency,
         freqMHz: body.frequency ? +(body.frequency / 1e6).toFixed(3) : 0,
         band: body.band,
@@ -30310,7 +30327,7 @@ var Stats = class {
   ageOut() {
     const now = Date.now();
     for (const [k, e] of this.entities) {
-      if (now - e.lastSeen > ENTITY_TTL_MS) this.entities.delete(k);
+      if (now - e.lastSeen > this.entityTtlMs) this.entities.delete(k);
     }
     for (const [k, e] of this.emitters) {
       if (now - e.lastSeen > EMITTER_TTL_MS) this.emitters.delete(k);
@@ -30331,6 +30348,19 @@ var Stats = class {
       else break;
     }
     return n;
+  }
+  byteRate() {
+    const now = Date.now();
+    const cutoff = now - 1e3;
+    let bytes = 0;
+    for (let i = this.byteRateWindow.length - 1; i >= 0; i--) {
+      if (this.byteRateWindow[i].t >= cutoff) bytes += this.byteRateWindow[i].b;
+      else break;
+    }
+    return bytes;
+  }
+  setEntityTimeout(secs) {
+    this.entityTtlMs = Math.max(secs * 1e3 * 3, 12e3);
   }
   snapshot() {
     this.ageOut();
@@ -30373,6 +30403,7 @@ var Stats = class {
       totalPdus: this.totalPdus,
       totalBytes: this.totalBytes,
       pduRate: this.pduRate(),
+      byteRate: this.byteRate(),
       entityCount: this.entities.size,
       emitterCount: this.emitters.size,
       types,
@@ -30607,7 +30638,7 @@ app.get("/export-pcap", (req, res) => {
 });
 var server = import_http.default.createServer(app);
 var wss = new import_websocket_server.default({ server });
-var stats = new Stats();
+var stats = new Stats({ entityTimeoutSecs: config.entityTimeoutSecs ?? 10 });
 var capture = null;
 var player = null;
 var mode = "idle";
@@ -30885,6 +30916,27 @@ wss.on("connection", (ws) => {
           const foundLogs = listLogs();
           broadcast({ kind: "dirs", recordDir, browseDir, message: `Save location set to ${dir}` });
           broadcast({ kind: "logs", logs: foundLogs, browseDir });
+          break;
+        }
+        case "setEntityTimeout": {
+          const secs = Math.max(1, Math.min(3600, +m.secs || 10));
+          config.entityTimeoutSecs = secs;
+          stats.setEntityTimeout(secs);
+          try {
+            import_fs4.default.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          } catch {
+          }
+          broadcast({ kind: "config", entityTimeoutSecs: secs });
+          break;
+        }
+        case "setSiteAppNames": {
+          config.siteNames = m.siteNames || {};
+          config.appNames = m.appNames || {};
+          try {
+            import_fs4.default.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          } catch {
+          }
+          broadcast({ kind: "config", siteNames: config.siteNames, appNames: config.appNames });
           break;
         }
         case "exportPcap": {

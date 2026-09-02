@@ -64,7 +64,12 @@ let selectedType = null;      // 'entity' | 'emitter'
 let lastStats = null;
 let lastDetailsSerial = null; // skip detail re-render when data is unchanged
 const sidcSvgCache = new Map(); // SIDC string → SVG string (keyed by full 20-char SIDC)
-let entityTimeoutMs = 5000;   // from config.entityTimeoutSecs; amber at ½, red at full
+let entityTimeoutMs = 10000;  // from config.entityTimeoutSecs; amber at ½, red at full
+let siteNames = {};  // { "100": "Site A" }
+const dataRateHistory = [];
+const pduRateHistory = [];
+const RATE_HISTORY_MAX = 240;
+let appNames = {};   // { "1": "Blue Force" }
 
 function $(id) { return document.getElementById(id); }
 
@@ -150,7 +155,22 @@ function handle(m) {
     case 'hello':
       if (m.networkAdapters) populateAdapters(m.networkAdapters, m.config?.capture?.bindAddress);
       applyConfig(m.config); $('recDir').value = m.recordDir || ''; $('browseDir').value = m.browseDir || '';
+      if (m.config?.entityTimeoutSecs) {
+        entityTimeoutMs = m.config.entityTimeoutSecs * 1000;
+        if ($('entityTimeoutSecs')) $('entityTimeoutSecs').value = m.config.entityTimeoutSecs;
+      }
+      if (m.config?.siteNames) { siteNames = m.config.siteNames; }
+      if (m.config?.appNames)  { appNames  = m.config.appNames;  }
+      if (typeof renderSiteAppNamesTable === 'function') renderSiteAppNamesTable();
       logs = m.logs || []; renderLogs(); setMode(m.mode); setRecording(m.recording, m.recordStartMs); break;
+    case 'config':
+      if (m.entityTimeoutSecs) {
+        entityTimeoutMs = m.entityTimeoutSecs * 1000;
+        if ($('entityTimeoutSecs')) $('entityTimeoutSecs').value = m.entityTimeoutSecs;
+      }
+      if (m.siteNames !== undefined) { siteNames = m.siteNames; if (typeof renderSiteAppNamesTable === 'function') renderSiteAppNamesTable(); }
+      if (m.appNames  !== undefined) { appNames  = m.appNames;  if (typeof renderSiteAppNamesTable === 'function') renderSiteAppNamesTable(); }
+      break;
     case 'stats':
       setMode(m.mode); setRecording(m.recording, m.recordStartMs, m.recordBytes);
       renderRecTimeline(m.recording, m.recordStartMs, m.bookmarks, m.recordBytes);
@@ -342,8 +362,20 @@ function renderStats(s) {
   $('mPdus').textContent = fmt(s.totalPdus);
   $('mRate').textContent = s.pduRate;
   $('mEntities').textContent = s.entityCount;
-  $('mEmitters').textContent = s.emitterCount;
   $('mBytes').textContent = fmtBytes(s.totalBytes);
+
+  pduRateHistory.push(s.pduRate || 0);
+  if (pduRateHistory.length > RATE_HISTORY_MAX) pduRateHistory.shift();
+  drawSparkline('pduRateGraph', pduRateHistory);
+
+  const bitsPerSec = (s.byteRate || 0) * 8;
+  dataRateHistory.push(bitsPerSec);
+  if (dataRateHistory.length > RATE_HISTORY_MAX) dataRateHistory.shift();
+  const maxBits = Math.max(...dataRateHistory, 0);
+  const useMb = maxBits >= 1e6;
+  $('mDataRate').textContent = useMb ? (bitsPerSec / 1e6).toFixed(3) : (bitsPerSec / 1e3).toFixed(1);
+  $('mDataRateUnit').textContent = useMb ? 'Mb/s' : 'kb/s';
+  drawSparkline('dataRateGraph', dataRateHistory);
 
   drawPie('pieChart', (s.types || []).map(t => ({ count: t.count, label: unCamel(t.name) })), 'PDUs');
   drawPie('sitePie', (s.sites || []).map(x => ({ count: x.count, label: `Site ${x.id}` })), 'Sites', (s.sites||[]).length);
@@ -371,7 +403,7 @@ function renderStats(s) {
     <tr data-key="${escapeHtml(e.key)}"${staleClass ? ` class="${staleClass.trim()}"` : ''}>
       <td>${iconHtml}${escapeHtml(e.marking) || ''}</td>
       <td>${escapeHtml(e.force) || ''}</td><td>${escapeHtml(e.kind) || ''}</td>
-      <td>${fnum(e.lat, 4)}</td><td>${fnum(e.lon, 4)}</td>
+      <td>${siteNames[String(e.siteId)] ? `<span title="Site ${e.siteId}">${escapeHtml(siteNames[String(e.siteId)])}</span>` : (e.siteId ?? '')}</td><td>${appNames[String(e.appId)] ? `<span title="App ${e.appId}">${escapeHtml(appNames[String(e.appId)])}</span>` : (e.appId ?? '')}</td>
       <td>${fnum(e.alt, 0)}</td><td>${fnum(e.heading, 0)}</td><td>${fnum(e.speed, 0)}</td>
     </tr>`;
   }).join('');
@@ -387,7 +419,7 @@ function renderStats(s) {
   const txb = $('txTableBody');
   if (txb) {
     txb.innerHTML = (s.transmitters || []).map(t => `
-      <tr data-key="${escapeHtml(t._key)}">
+      <tr data-key="${escapeHtml(t._key)}"${t.txState === 2 ? ' class="tx-active"' : ''}>
         <td>${escapeHtml(t.entityKey)}</td><td>${t.radioId}</td>
         <td>${escapeHtml(t.txStateName)}</td><td>${t.freqMHz}</td>
         <td>${escapeHtml(t.band || '—')}</td><td>${t.power}</td>
@@ -505,6 +537,29 @@ function decodeCapabilities(caps) {
   return flags.length ? flags : ['None'];
 }
 
+function drawSparkline(canvasId, history) {
+  const canvas = $(canvasId);
+  if (!canvas) return;
+  const w = canvas.offsetWidth || canvas.parentElement?.offsetWidth || 120;
+  canvas.width = w;
+  canvas.height = 28;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, 28);
+  if (history.length < 2) return;
+  const max = Math.max(...history, 0.001);
+  ctx.beginPath();
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#4af';
+  ctx.lineWidth = 1.5;
+  const step = w / (RATE_HISTORY_MAX - 1);
+  const startIdx = Math.max(0, history.length - RATE_HISTORY_MAX);
+  history.forEach((v, i) => {
+    const x = (i - startIdx) * step;
+    const y = 28 - (v / max) * 26;
+    i === startIdx ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
 function renderDetails(data) {
   const el = $('detailsContent');
   if (!data) {
@@ -516,7 +571,7 @@ function renderDetails(data) {
   if (document.getSelection().type === 'Range') return;
   // Skip if content hasn't changed. Excludes lastSeen so a heartbeat-only update doesn't
   // rebuild the pane and cause the "Xs ago" field to flash.
-  const serial = `${selectedKey}|${selectedType}|${data.lat||''}|${data.lon||''}|${data.alt||''}|${data.heading||''}|${data.speed||''}`;
+  const serial = `${selectedKey}|${selectedType}|${data.lat||''}|${data.lon||''}|${data.alt||''}|${data.heading||''}|${data.speed||''}|${data.orientation?.psi?.toFixed(3)||''}|${data.velocity?.x?.toFixed(2)||''}|${data.drAlgorithm??''}`;
   if (serial === lastDetailsSerial) return;
   lastDetailsSerial = serial;
 
@@ -566,7 +621,7 @@ function renderDetails(data) {
 
         <dt class="detail-section">Type</dt>
         <dt>Type code</dt><dd>${escapeHtml(e.type||'—')}</dd>
-        ${typeLabel ? `<dt>Type</dt><dd class="enum-type">${escapeHtml(typeLabel)}</dd>` : ''}
+        ${typeLabel ? `<dt>Inferred Type</dt><dd class="detail-wide-value">${escapeHtml(typeLabel)}</dd>` : ''}
         <dt>Kind</dt><dd>${escapeHtml(e.kind||'—')}</dd>
         <dt>Domain</dt><dd>${escapeHtml(e.domain||'—')}</dd>
 
@@ -574,36 +629,35 @@ function renderDetails(data) {
         <dt>Latitude</dt><dd>${fnum(e.lat,6)||'—'}</dd>
         <dt>Longitude</dt><dd>${fnum(e.lon,6)||'—'}</dd>
         <dt>Altitude</dt><dd>${fnum(e.alt,0)||'—'} m / ${mToFt(e.alt)} ft</dd>
-        ${e.location ? `
-        <dt>ECEF X</dt><dd>${fnum(e.location.x,0)} m</dd>
-        <dt>ECEF Y</dt><dd>${fnum(e.location.y,0)} m</dd>
-        <dt>ECEF Z</dt><dd>${fnum(e.location.z,0)} m</dd>` : ''}
+        <dt class="detail-subsection">ECEF</dt>
+        <dt>X</dt><dd>${e.location ? fnum(e.location.x,0)+' m' : '—'}</dd>
+        <dt>Y</dt><dd>${e.location ? fnum(e.location.y,0)+' m' : '—'}</dd>
+        <dt>Z</dt><dd>${e.location ? fnum(e.location.z,0)+' m' : '—'}</dd>
 
         <dt class="detail-section">Motion</dt>
-        <dt>Heading (ψ)</dt><dd>${hasOri ? (((e.orientation.psi*180/Math.PI)+360)%360).toFixed(2)+'°' : (fnum(e.heading,1)||'—')+'°'}</dd>
+        <dt>Heading (ψ)</dt><dd>${(fnum(e.heading,1)||'—')+'°'}</dd>
         <dt>Speed</dt><dd>${fnum(e.speed,2)||'—'} m/s · ${mpsToKts(e.speed)} kts · ${mpsToMph(e.speed)} mph</dd>
-        ${climbRate != null ? `<dt>Climb rate</dt><dd>${climbRate.toFixed(2)} m/s</dd>` : ''}
-        ${hasVel ? `
-        <dt>ECEF Vx</dt><dd>${fnum(e.velocity.x,3)} m/s</dd>
-        <dt>ECEF Vy</dt><dd>${fnum(e.velocity.y,3)} m/s</dd>
-        <dt>ECEF Vz</dt><dd>${fnum(e.velocity.z,3)} m/s</dd>` : ''}
+        <dt>Climb rate</dt><dd>${climbRate != null ? climbRate.toFixed(2)+' m/s' : '—'}</dd>
+        <dt class="detail-subsection">ECEF Velocity</dt>
+        <dt>X</dt><dd>${e.velocity ? fnum(e.velocity.x,3)+' m/s' : '—'}</dd>
+        <dt>Y</dt><dd>${e.velocity ? fnum(e.velocity.y,3)+' m/s' : '—'}</dd>
+        <dt>Z</dt><dd>${e.velocity ? fnum(e.velocity.z,3)+' m/s' : '—'}</dd>
 
-        ${hasOri ? `
         <dt class="detail-section">Orientation</dt>
-        <dt>Pitch (θ)</dt><dd>${r2d(e.orientation.theta)}°</dd>
-        <dt>Roll (φ)</dt><dd>${r2d(e.orientation.phi)}°</dd>` : ''}
+        <dt title="(Yaw / Heading) Rotation about the world Z-axis (which points out of the North Pole in the DIS geocentric system). It dictates the horizontal heading of the entity.">Psi (ψ)</dt><dd>${e.orientation ? (((e.orientation.psi*180/Math.PI)+360)%360).toFixed(2)+'°' : '—'}</dd>
+        <dt title="(Pitch) Rotation about the entity&#39;s Y-axis. Represents the nose-up or nose-down attitude of the entity.">Theta (θ)</dt><dd>${e.orientation ? r2d(e.orientation.theta)+'°' : '—'}</dd>
+        <dt title="(Roll) Rotation about the entity&#39;s X-axis. Represents the bank angle / tilt around the longitudinal axis.">Phi (φ)</dt><dd>${e.orientation ? r2d(e.orientation.phi)+'°' : '—'}</dd>
 
-        ${hasDR ? `
         <dt class="detail-section">Dead Reckoning</dt>
-        <dt>Algorithm</dt><dd>${escapeHtml(DR_ALGORITHM[e.drAlgorithm]||String(e.drAlgorithm))}</dd>
-        ${e.drLinearAcceleration ? `
-        <dt>Lin Acc X</dt><dd>${fnum(e.drLinearAcceleration.x,4)} m/s²</dd>
-        <dt>Lin Acc Y</dt><dd>${fnum(e.drLinearAcceleration.y,4)} m/s²</dd>
-        <dt>Lin Acc Z</dt><dd>${fnum(e.drLinearAcceleration.z,4)} m/s²</dd>` : ''}
-        ${e.drAngularVelocity ? `
-        <dt>Ang Vel X</dt><dd>${fnum(e.drAngularVelocity.x,5)} rad/s</dd>
-        <dt>Ang Vel Y</dt><dd>${fnum(e.drAngularVelocity.y,5)} rad/s</dd>
-        <dt>Ang Vel Z</dt><dd>${fnum(e.drAngularVelocity.z,5)} rad/s</dd>` : ''}` : ''}
+        <dt>Algorithm</dt><dd>${e.drAlgorithm != null ? escapeHtml(DR_ALGORITHM[e.drAlgorithm]||String(e.drAlgorithm)) : '—'}</dd>
+        <dt class="detail-subsection">Linear Acceleration</dt>
+        <dt>X</dt><dd>${e.drLinearAcceleration ? fnum(e.drLinearAcceleration.x,4)+' m/s²' : '—'}</dd>
+        <dt>Y</dt><dd>${e.drLinearAcceleration ? fnum(e.drLinearAcceleration.y,4)+' m/s²' : '—'}</dd>
+        <dt>Z</dt><dd>${e.drLinearAcceleration ? fnum(e.drLinearAcceleration.z,4)+' m/s²' : '—'}</dd>
+        <dt class="detail-subsection">Angular Velocity</dt>
+        <dt>X</dt><dd>${e.drAngularVelocity ? fnum(e.drAngularVelocity.x,5)+' rad/s' : '—'}</dd>
+        <dt>Y</dt><dd>${e.drAngularVelocity ? fnum(e.drAngularVelocity.y,5)+' rad/s' : '—'}</dd>
+        <dt>Z</dt><dd>${e.drAngularVelocity ? fnum(e.drAngularVelocity.z,5)+' rad/s' : '—'}</dd>
 
         ${appRows.length ? `
         <dt class="detail-section">Appearance</dt>
@@ -931,6 +985,12 @@ function doPlay() {
 function init() {
   window.MapView.init({
     onEntityClick: (key) => {
+      if (!key) {
+        selectedKey = null; selectedType = null;
+        applyTableSelection();
+        window.MapView.setSelected(null);
+        return;
+      }
       const entity = lastStats?.entities?.find(x => x.key === key);
       if (entity) {
         selectItem(key, 'entity', entity);
@@ -944,10 +1004,19 @@ function init() {
   buildMultiselect($('recVersionFilter'), DIS_VERSIONS, 'All versions', (v, n) => `v${v} — ${n}`);
   buildMultiselect($('repVersionFilter'), DIS_VERSIONS, 'All versions', (v, n) => `v${v} — ${n}`);
   document.addEventListener('click', () => document.querySelectorAll('.multiselect.open').forEach(el => el.classList.remove('open')));
+  $('recFilter').addEventListener('change', updateFilterIndicators);
+  $('recVersionFilter').addEventListener('change', updateFilterIndicators);
+  $('recSiteIds').addEventListener('input', updateFilterIndicators);
+  $('recAppIds').addEventListener('input', updateFilterIndicators);
+  $('repFilter').addEventListener('change', updateFilterIndicators);
+  $('repVersionFilter').addEventListener('change', updateFilterIndicators);
+  $('repSiteIds').addEventListener('input', updateFilterIndicators);
+  $('repAppIds').addEventListener('input', updateFilterIndicators);
 
   document.querySelectorAll('.tab').forEach((t) => t.onclick = () => {
     document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
     t.classList.add('active');
+    $('tab-view').classList.toggle('hidden', t.dataset.tab !== 'view');
     $('tab-capture').classList.toggle('hidden', t.dataset.tab !== 'capture');
     $('tab-replay').classList.toggle('hidden', t.dataset.tab !== 'replay');
   });
@@ -1033,13 +1102,104 @@ function init() {
   $('btnOpenDir').onclick = doOpenDir;
   $('browseDir').onkeydown = (e) => { if (e.key === 'Enter') doOpenDir(); };
 
+  function renderSiteAppNamesTable() {
+    const tbody = $('siteAppNamesTable').querySelector('tbody');
+    const rows = [
+      ...Object.entries(siteNames).map(([id, name]) => ({ type: 'site', id, name })),
+      ...Object.entries(appNames).map(([id, name]) => ({ type: 'app', id, name })),
+    ];
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${r.type}</td><td>${escapeHtml(String(r.id))}</td><td>${escapeHtml(r.name)}</td>
+        <td><button class="mini" data-del-type="${r.type}" data-del-id="${r.id}">✕</button></td>
+      </tr>`).join('');
+    tbody.querySelectorAll('[data-del-type]').forEach(btn => {
+      btn.onclick = () => {
+        if (btn.dataset.delType === 'site') delete siteNames[btn.dataset.delId];
+        else delete appNames[btn.dataset.delId];
+        renderSiteAppNamesTable();
+        send({ cmd: 'setSiteAppNames', siteNames, appNames });
+      };
+    });
+  }
+  $('btnAddName').onclick = () => {
+    const type = $('nameType').value;
+    const id = String(parseInt($('nameId').value, 10));
+    const name = ($('nameLabel').value || '').trim();
+    if (!id || id === 'NaN' || !name) return;
+    if (type === 'site') siteNames[id] = name; else appNames[id] = name;
+    $('nameId').value = ''; $('nameLabel').value = '';
+    renderSiteAppNamesTable();
+    send({ cmd: 'setSiteAppNames', siteNames, appNames });
+  };
+
+  function updateFilterIndicators() {
+    function isActive(filterEl, versionEl, siteEl, appEl) {
+      const t = filterPayload(filterEl); const v = filterPayload(versionEl);
+      const s = parseIdList((siteEl?.value || '')); const a = parseIdList((appEl?.value || ''));
+      return t.length > 0 || v.length > 0 || s.length > 0 || a.length > 0;
+    }
+    const capActive = isActive($('recFilter'), $('recVersionFilter'), $('recSiteIds'), $('recAppIds'));
+    const repActive = isActive($('repFilter'), $('repVersionFilter'), $('repSiteIds'), $('repAppIds'));
+    $('viewFilterIcon').classList.toggle('hidden', !capActive);
+    $('viewFilterPill').classList.toggle('hidden', !capActive);
+    $('replayFilterIcon').classList.toggle('hidden', !repActive);
+    $('replayFilterPill').classList.toggle('hidden', !repActive);
+  }
+
+  $('mapSettings').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('mapSettingsPopup').classList.toggle('hidden');
+  });
+  document.addEventListener('click', () => $('mapSettingsPopup')?.classList.add('hidden'));
+
+  $('monitorSettings').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('monitorSettingsPopup').classList.toggle('hidden');
+  });
+  document.addEventListener('click', () => $('monitorSettingsPopup')?.classList.add('hidden'));
+  $('mapSettingsPopup')?.addEventListener('click', (e) => e.stopPropagation());
+  $('monitorSettingsPopup')?.addEventListener('click', (e) => e.stopPropagation());
+  $('entityTimeoutSecs').onchange = () => {
+    const v = Math.max(1, +$('entityTimeoutSecs').value || 10);
+    entityTimeoutMs = v * 1000;
+    $('entityTimeoutSecs').value = v;
+    send({ cmd: 'setEntityTimeout', secs: v });
+  };
+
+  $('mapInfo').addEventListener('click', () => {
+    const next = !$('mapTiles').checked;
+    $('mapTiles').checked = next;
+    window.MapView.setTiles(next, $('mapInfo'));
+  });
   $('mapTiles').onchange = () => window.MapView.setTiles($('mapTiles').checked, $('mapInfo'));
+  $('mapFollow').onchange = () => window.MapView.setFollow($('mapFollow').checked);
+  $('mapDirections').onchange = () => window.MapView.setShowDirections($('mapDirections').checked);
+  $('mapDR').onchange = () => {
+    const on = $('mapDR').checked;
+    $('mapBoth').disabled = !on;
+    if (!on) $('mapBoth').checked = false;
+    window.MapView.setShowDR(on, $('mapBoth').checked);
+  };
+  $('mapBoth').onchange = () => window.MapView.setShowDR($('mapDR').checked, $('mapBoth').checked);
+  $('mapBoth').disabled = true;
+  $('symScale').addEventListener('input', () => window.MapView.setSymbolSize(+$('symScale').value));
+  $('mapHistory').onchange = () => {
+    const on = $('mapHistory').checked;
+    $('historyLengthRow').style.display = on ? '' : 'none';
+    $('historyColorRow').style.display = on ? '' : 'none';
+    window.MapView.setHistory(on, +$('historyLength').value, $('historyColor').value);
+  };
+  $('historyLength').addEventListener('input', () =>
+    window.MapView.setHistory($('mapHistory').checked, +$('historyLength').value, $('historyColor').value));
+  $('historyColor').addEventListener('input', () =>
+    window.MapView.setHistory($('mapHistory').checked, +$('historyLength').value, $('historyColor').value));
   $('mapReset').onclick = () => window.MapView.resetView();
   $('mapExpand').onclick = () => {
     const main = document.querySelector('main');
     const expanded = main.classList.toggle('map-expanded');
     $('mapExpand').textContent = expanded ? '⊡' : '⛶';
-    $('mapExpand').title = expanded ? 'Restore map' : 'Expand map';
+    $('mapExpand').title = expanded ? 'Restore map' : 'Fullscreen';
     setTimeout(() => window.MapView.resize(), 50);
   };
   window.MapView.setTiles(false, $('mapInfo'));
@@ -1099,8 +1259,6 @@ function init() {
     const tab = t.dataset.ptab;
     document.querySelectorAll('.ptabbody').forEach(b => b.classList.toggle('hidden', b.id !== `ptab-${tab}`));
   }));
-
-  $('symScale').addEventListener('input', () => window.MapView.setSymbolSize(+$('symScale').value));
 
   // Tick the "X s ago" display in the details pane every second
   setInterval(() => {

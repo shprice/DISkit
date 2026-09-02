@@ -62,7 +62,13 @@ function entityStatePdu(idx, t) {
   o += 12;
   buf.writeDoubleBE(x, o); buf.writeDoubleBE(y, o + 8); buf.writeDoubleBE(z, o + 16);
   o += 24;
-  buf.writeFloatBE(((ang + Math.PI / 2) % (2 * Math.PI)), o); // psi (heading)
+  // Convert local compass heading to ECEF PSI (IEEE 1278.1 convention).
+  // Inverse of: heading = atan2(sin(PSI - lon), -sin(lat) * cos(PSI - lon))
+  const localHeading = ang + Math.PI / 2;
+  const latRad = lat * Math.PI / 180;
+  const lonRad = lon * Math.PI / 180;
+  const psi = lonRad + Math.atan2(Math.sin(localHeading) * Math.sin(latRad), -Math.cos(localHeading));
+  buf.writeFloatBE(psi, o); // psi (ECEF heading)
   buf.writeFloatBE(0, o + 4); buf.writeFloatBE(0, o + 8);
   o += 12;
   buf.writeUInt32BE(0, o); o += 4;   // appearance

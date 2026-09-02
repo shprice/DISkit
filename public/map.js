@@ -18,9 +18,62 @@ const MapView = (() => {
   let dragging = false, lastX = 0, lastY = 0;
   let mouseDownX = 0, mouseDownY = 0;
 
+  // Persisted view state for each provider to allow sync on switch
+  let canvasSyncView = null;   // { minLat, maxLat, minLon, maxLon } — last visible bounds on canvas
+  let leafletSyncView = null;  // { lat, lon, zoom } — last Leaflet view
+
+  // History trail
+  const posHistory = new Map(); // entityKey → [{lat, lon}] oldest→newest
+  let showHistory = false;
+  let historyLength = 100;
+  let historyColor = '#f0c674';
+  const historyLayers = new Map(); // entityKey → L.polyline[]
+
   let selectedKey = null;
   let onEntityClick = null;
   let animFrame = null;
+  let pulseRing = null;       // Leaflet circleMarker for selection pulse animation
+
+  let showDirections = false;  // draw heading arrows
+  let showDR = false;          // overlay dead-reckoned positions
+  let showBoth = false;        // show ground-truth AND DR together
+  let followSelected = false;  // keep map centred on selected entity
+
+  // WGS-84 ECEF → geodetic (lat°, lon°, alt m)
+  function ecefToLlh(x, y, z) {
+    const a = 6378137.0, f = 1 / 298.257223563;
+    const e2 = 2 * f - f * f;
+    const lon = Math.atan2(y, x);
+    const p = Math.hypot(x, y);
+    let lat = Math.atan2(z, p * (1 - e2));
+    for (let i = 0; i < 10; i++) {
+      const sinLat = Math.sin(lat);
+      const N = a / Math.sqrt(1 - e2 * sinLat * sinLat);
+      lat = Math.atan2(z + e2 * N * sinLat, p);
+    }
+    const sinLat = Math.sin(lat);
+    const N = a / Math.sqrt(1 - e2 * sinLat * sinLat);
+    const alt = p / Math.cos(lat) - N;
+    return { lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI, alt };
+  }
+
+  // Extrapolate entity ECEF position using its DR algorithm + elapsed time.
+  function computeDrPosition(e) {
+    if (!e.location || !e.drAlgorithm || e.drAlgorithm === 0 || e.drAlgorithm === 1) return null;
+    const dt = (Date.now() - (e.lastSeen || 0)) / 1000;
+    if (dt <= 0 || dt > 300) return null;
+    const v = e.velocity || {};
+    const acc = e.drLinearAcceleration || {};
+    let dx, dy, dz;
+    if (e.drAlgorithm === 4 || e.drAlgorithm === 8) {
+      dx = (v.x||0)*dt + 0.5*(acc.x||0)*dt*dt;
+      dy = (v.y||0)*dt + 0.5*(acc.y||0)*dt*dt;
+      dz = (v.z||0)*dt + 0.5*(acc.z||0)*dt*dt;
+    } else {
+      dx = (v.x||0)*dt; dy = (v.y||0)*dt; dz = (v.z||0)*dt;
+    }
+    return ecefToLlh(e.location.x + dx, e.location.y + dy, e.location.z + dz);
+  }
 
   // Milsymbol canvas symbol cache: "sidc@size" -> { img, ready, size, anchor } | null
   const symbolCache = new Map();
@@ -268,7 +321,7 @@ const MapView = (() => {
         const d = Math.hypot(p.x - mx, p.y - my);
         if (d < bestDist) { bestDist = d; best = ent; }
       }
-      if (best && onEntityClick) onEntityClick(best.key);
+      if (onEntityClick) onEntityClick(best ? best.key : null);
     });
 
     canvas.addEventListener('wheel', (e) => {
@@ -276,7 +329,7 @@ const MapView = (() => {
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      const nz = Math.min(80, Math.max(0.02, zoom * factor));
+      const nz = Math.min(500, Math.max(0.02, zoom * factor));
       const k = nz / zoom;
       panX = mx - (mx - panX) * k;
       panY = my - (my - panY) * k;
@@ -334,7 +387,7 @@ const MapView = (() => {
         const d = Math.hypot(px - mx, py - my);
         if (d < bestDist) { bestDist = d; best = ent; }
       }
-      if (best && onEntityClick) onEntityClick(best.key);
+      if (onEntityClick) onEntityClick(best ? best.key : null);
     }
 
     canvas.addEventListener('touchstart', (e) => {
@@ -373,7 +426,7 @@ const MapView = (() => {
         const factor = newDist / touchPinchDist;
         const rect = canvas.getBoundingClientRect();
         const mx = touchPinchMidX - rect.left, my = touchPinchMidY - rect.top;
-        const nz = Math.min(80, Math.max(0.02, zoom * factor));
+        const nz = Math.min(500, Math.max(0.02, zoom * factor));
         const k = nz / zoom;
         panX = mx - (mx - panX) * k;
         panY = my - (my - panY) * k;
@@ -485,42 +538,141 @@ const MapView = (() => {
       ctx.stroke();
     }
 
+    // --- Pass 1: ground-truth entities (+ connecting lines to DR) ---
+    const drawGT = !showDR || showBoth;
     for (const e of lastEntities) {
       if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
-      const p = project(e.lat, e.lon);
-      if (p.x < -40 || p.x > w + 40 || p.y < -40 || p.y > h + 40) continue;
-      const col = forceColors[e.forceId] || '#c9a227';
       const hdg = (e.heading || 0) * Math.PI / 180;
+      const col = forceColors[e.forceId] || '#c9a227';
 
-      const sidc = entityToSidc(e);
-      const sym = sidc ? getOrCreateSymbol(sidc) : null;
+      if (drawGT) {
+        const p = project(e.lat, e.lon);
+        if (p.x < -40 || p.x > w + 40 || p.y < -40 || p.y > h + 40) continue;
+        const sidc = entityToSidc(e);
+        const sym = sidc ? getOrCreateSymbol(sidc) : null;
+        if (sym?.ready) {
+          ctx.drawImage(sym.img, p.x - sym.anchor.x, p.y - sym.anchor.y, sym.size.width, sym.size.height);
+        } else {
+          ctx.save();
+          ctx.translate(p.x, p.y); ctx.rotate(hdg);
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        if (showDirections) {
+          const len = 25;
+          const dx = Math.sin(hdg) * len, dy = -Math.cos(hdg) * len;
+          ctx.save();
+          ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + dx, p.y + dy); ctx.stroke();
+          const ax = p.x + dx, ay = p.y + dy;
+          ctx.fillStyle = '#3fb950';
+          ctx.beginPath();
+          ctx.moveTo(ax + Math.sin(hdg - 2.5) * 5, ay - Math.cos(hdg - 2.5) * 5);
+          ctx.lineTo(ax + Math.sin(hdg) * 8,       ay - Math.cos(hdg) * 8);
+          ctx.lineTo(ax + Math.sin(hdg + 2.5) * 5, ay - Math.cos(hdg + 2.5) * 5);
+          ctx.closePath(); ctx.fill();
+          ctx.restore();
+        }
+        if (e.key === selectedKey) {
+          const t = performance.now();
+          const pulse = Math.sin(t / 300) * 0.5 + 0.5;
+          const pr = 14 + pulse * 6;
+          ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 2 * Math.PI);
+          ctx.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.45})`;
+          ctx.lineWidth = 2; ctx.stroke();
+          ctx.beginPath(); ctx.arc(p.x, p.y, pr + 5, 0, 2 * Math.PI);
+          ctx.strokeStyle = `rgba(47,129,247,${0.25 + pulse * 0.35})`;
+          ctx.lineWidth = 1.5; ctx.stroke();
+        }
+        ctx.fillStyle = '#c7d0da'; ctx.font = '10px system-ui';
+        ctx.fillText(e.marking || '', p.x + 8, p.y + 3);
 
-      if (sym?.ready) {
-        ctx.drawImage(sym.img, p.x - sym.anchor.x, p.y - sym.anchor.y, sym.size.width, sym.size.height);
-      } else {
+        // Dashed line GT → DR when showing both (drawn in pass 1 so it's behind DR icon)
+        if (showBoth) {
+          const drPos = computeDrPosition(e);
+          if (drPos && isFinite(drPos.lat) && isFinite(drPos.lon)) {
+            const dp = project(drPos.lat, drPos.lon);
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(dp.x, dp.y); ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
+    }
+
+    // --- Pass 2: DR positions on top of ground-truth ---
+    if (showDR || showBoth) {
+      for (const e of lastEntities) {
+        if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
+        const drPos = computeDrPosition(e);
+        if (!drPos || !isFinite(drPos.lat) || !isFinite(drPos.lon)) continue;
+        const dp = project(drPos.lat, drPos.lon);
+        if (dp.x < -40 || dp.x > w + 40 || dp.y < -40 || dp.y > h + 40) continue;
+        const hdg = (e.heading || 0) * Math.PI / 180;
+        const col = forceColors[e.forceId] || '#c9a227';
         ctx.save();
-        ctx.translate(p.x, p.y); ctx.rotate(hdg);
-        ctx.fillStyle = col;
+        ctx.globalAlpha = 0.5;
+        ctx.translate(dp.x, dp.y); ctx.rotate(hdg);
+        ctx.strokeStyle = '#3fb950'; ctx.fillStyle = col;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
-        ctx.fill();
+        ctx.fill(); ctx.stroke();
         ctx.restore();
+        if (showDirections) {
+          const len = 25;
+          const dx = Math.sin(hdg) * len, dy = -Math.cos(hdg) * len;
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(dp.x, dp.y); ctx.lineTo(dp.x + dx, dp.y + dy); ctx.stroke();
+          ctx.restore();
+        }
       }
-
-      if (e.key === selectedKey) {
-        const t = performance.now();
-        const pulse = Math.sin(t / 300) * 0.5 + 0.5;
-        const pr = 14 + pulse * 6;
-        ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 2 * Math.PI);
-        ctx.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.45})`;
-        ctx.lineWidth = 2; ctx.stroke();
-        ctx.beginPath(); ctx.arc(p.x, p.y, pr + 5, 0, 2 * Math.PI);
-        ctx.strokeStyle = `rgba(47,129,247,${0.25 + pulse * 0.35})`;
-        ctx.lineWidth = 1.5; ctx.stroke();
-      }
-      ctx.fillStyle = '#c7d0da'; ctx.font = '10px system-ui';
-      ctx.fillText(e.marking || '', p.x + 8, p.y + 3);
     }
+
+    // Draw history trails on canvas
+    if (showHistory) {
+      ctx.save();
+      for (const [, hist] of posHistory) {
+        if (hist.length < 2) continue;
+        const CHUNKS = Math.min(15, hist.length - 1);
+        const chunkSize = Math.ceil((hist.length - 1) / CHUNKS);
+        for (let c = 0; c < CHUNKS; c++) {
+          const start = c * chunkSize;
+          const end = Math.min(start + chunkSize + 1, hist.length);
+          if (start >= hist.length - 1) break;
+          ctx.beginPath();
+          ctx.strokeStyle = historyColor;
+          ctx.globalAlpha = ((c + 1) / CHUNKS) * 0.85;
+          ctx.lineWidth = 2;
+          ctx.lineJoin = 'round';
+          for (let i = start; i < end; i++) {
+            const p = hist[i];
+            const px = ((p.lon - b.minLon) / (b.maxLon - b.minLon) * mapW + ox) * zoom + panX;
+            const py = ((1 - (p.lat - b.minLat) / (b.maxLat - b.minLat)) * mapH + oy) * zoom + panY;
+            if (i === start) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // Save current visible canvas geographic extent for provider-switch sync
+    canvasSyncView = {
+      minLon: b.minLon + ((0 - panX) / zoom - ox) / mapW * (b.maxLon - b.minLon),
+      maxLon: b.minLon + ((w - panX) / zoom - ox) / mapW * (b.maxLon - b.minLon),
+      maxLat: b.maxLat - ((0 - panY) / zoom - oy) / mapH * (b.maxLat - b.minLat),
+      minLat: b.maxLat - ((h - panY) / zoom - oy) / mapH * (b.maxLat - b.minLat),
+    };
 
     ctx.fillStyle = '#5c6b7a'; ctx.font = '10px ui-monospace, monospace';
     ctx.fillText(`${b.maxLat.toFixed(2)}, ${b.minLon.toFixed(2)}`, 4, 12);
@@ -539,46 +691,110 @@ const MapView = (() => {
     }
   }
 
-  function setSelected(key) {
-    selectedKey = key;
-    if (key) {
-      const e = lastEntities.find(x => x.key === key);
-      if (e && isFinite(e.lat) && isFinite(e.lon)) {
-        if (useTiles && leaflet) {
-          leaflet.panTo([e.lat, e.lon]);
-        } else if (canvas) {
-          const b = bounds(lastEntities) || WORLD;
-          const w = canvas.width, h = canvas.height;
-          const { mapW: sMapW, mapH: sMapH, ox: sOx, oy: sOy } = projGeo(b, w, h);
-          const relX = ((e.lon - b.minLon) / (b.maxLon - b.minLon) * sMapW + sOx) * zoom;
-          const relY = ((1 - (e.lat - b.minLat) / (b.maxLat - b.minLat)) * sMapH + sOy) * zoom;
-          panX = w / 2 - relX;
-          panY = h / 2 - relY;
-        }
-      }
-    }
-    if (useTiles) {
-      updateLeaflet();
-    } else {
-      if (key && !animFrame) startSelectionAnim();
-      else if (!key && animFrame) { cancelAnimationFrame(animFrame); animFrame = null; draw(); }
-      else draw();
-    }
+  // Pulse ring is a CSS-animated divIcon — no JS RAF needed for the animation itself.
+  // The RAF loop is only used for: canvas pulse/DR (via draw()), Leaflet DR position smoothing.
+  function needsLoop() {
+    return (!useTiles && (!!selectedKey || showDR || showBoth)) || (useTiles && (showDR || showBoth));
   }
 
-  function startSelectionAnim() {
+  function ensureLoop() {
+    if (animFrame || !needsLoop()) return;
     function tick() {
-      if (!selectedKey || useTiles) { animFrame = null; return; }
-      draw();
+      if (!needsLoop()) { animFrame = null; return; }
+      if (useTiles) {
+        // Smooth Leaflet DR markers between PDU arrivals
+        for (const e of lastEntities) {
+          const dm = drMarkers.get(e.key);
+          if (!dm) continue;
+          const drPos = computeDrPosition(e);
+          if (drPos && isFinite(drPos.lat) && isFinite(drPos.lon)) dm.setLatLng([drPos.lat, drPos.lon]);
+        }
+      } else {
+        draw(); // canvas: selection pulse + DR handled inside draw()
+      }
       animFrame = requestAnimationFrame(tick);
     }
     animFrame = requestAnimationFrame(tick);
   }
 
+  function stopLoop() {
+    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  }
+
+  function makePulseRing(lat, lon) {
+    if (!leaflet || !window.L) return null;
+    ensurePanes();
+    return window.L.marker([lat, lon], {
+      icon: window.L.divIcon({
+        html: '<div class="map-sel-pulse"></div>',
+        className: '',
+        iconSize: [88, 88],
+        iconAnchor: [44, 44],
+      }),
+      pane: 'selPane',
+      interactive: false,
+    }).addTo(leaflet);
+  }
+
+  function setSelected(key) {
+    selectedKey = key;
+    const ent = key ? lastEntities.find(x => x.key === key) : null;
+    if (ent && isFinite(ent.lat) && isFinite(ent.lon)) {
+      if (useTiles && leaflet) {
+        leaflet.panTo([ent.lat, ent.lon]);
+      } else if (canvas) {
+        const b = bounds(lastEntities) || WORLD;
+        const w = canvas.width, h = canvas.height;
+        const { mapW: sMapW, mapH: sMapH, ox: sOx, oy: sOy } = projGeo(b, w, h);
+        const relX = ((ent.lon - b.minLon) / (b.maxLon - b.minLon) * sMapW + sOx) * zoom;
+        const relY = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * sMapH + sOy) * zoom;
+        panX = w / 2 - relX;
+        panY = h / 2 - relY;
+      }
+    }
+    if (useTiles) {
+      if (pulseRing && leaflet) { leaflet.removeLayer(pulseRing); pulseRing = null; }
+      if (ent && isFinite(ent.lat) && isFinite(ent.lon)) pulseRing = makePulseRing(ent.lat, ent.lon);
+      updateLeaflet();
+    } else {
+      draw();
+    }
+    if (needsLoop()) ensureLoop(); else stopLoop();
+  }
+
   function update(entities) {
     lastEntities = entities || [];
+    if (showHistory && !useTiles) {
+      for (const e of lastEntities) {
+        if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
+        let hist = posHistory.get(e.key);
+        if (!hist) { hist = []; posHistory.set(e.key, hist); }
+        const last = hist[hist.length - 1];
+        if (!last || last.lat !== e.lat || last.lon !== e.lon) {
+          hist.push({ lat: e.lat, lon: e.lon });
+          if (hist.length > historyLength) hist.shift();
+        }
+      }
+    }
+    if (followSelected && selectedKey) {
+      const ent = lastEntities.find(x => x.key === selectedKey);
+      if (ent && isFinite(ent.lat) && isFinite(ent.lon)) {
+        if (useTiles && leaflet) {
+          leaflet.panTo([ent.lat, ent.lon], { animate: true, duration: 0.3 });
+        } else if (canvas) {
+          const b = bounds(lastEntities) || WORLD;
+          const w = canvas.width, h = canvas.height;
+          const { mapW: fMapW, mapH: fMapH, ox: fOx, oy: fOy } = projGeo(b, w, h);
+          const relX = ((ent.lon - b.minLon) / (b.maxLon - b.minLon) * fMapW + fOx) * zoom;
+          const relY = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * fMapH + fOy) * zoom;
+          panX = w / 2 - relX;
+          panY = h / 2 - relY;
+        }
+      }
+    }
     if (useTiles && leaflet) updateLeaflet();
-    else draw();
+    else if (!animFrame) draw(); // loop already calling draw() if running
+    ensureLoop(); // start loop if DR or selection needs it
   }
 
   function makeMilIcon(entity) {
@@ -602,8 +818,47 @@ const MapView = (() => {
     return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // key -> Leaflet polyline (direction line), polygon (arrowhead), and drMarker (DR circle)
+  const dirLines = new Map();
+  const dirArrows = new Map();
+  const drMarkers = new Map();
+
+  // Compute a lat/lon endpoint `d` metres in the heading direction (degrees,
+  // clockwise from North).  headingDeg is already a true compass bearing after
+  // the PSI→heading transformation in decoders.js, so no offset is needed.
+  function headingEndpoint(lat, lon, hdgDeg, d = 1000) {
+    const R = 6378137;
+    const hdgRad = hdgDeg * Math.PI / 180;
+    const latRad = lat * Math.PI / 180;
+    const dlat = Math.cos(hdgRad) * d / R;
+    const dlon = Math.sin(hdgRad) * d / (R * Math.cos(latRad));
+    return [lat + dlat * 180 / Math.PI, lon + dlon * 180 / Math.PI];
+  }
+
+  function headingLineMeters(lat) {
+    if (!leaflet) return 1000;
+    const z = leaflet.getZoom();
+    const mpp = 40075016.686 * Math.abs(Math.cos(lat * Math.PI / 180)) / Math.pow(2, z + 8);
+    return Math.max(200, Math.min(50000, 65 * mpp)); // 65 screen-pixels worth of metres
+  }
+
+  function ensurePanes() {
+    if (!leaflet) return;
+    if (!leaflet.getPane('drPane')) {
+      leaflet.createPane('drPane');
+      leaflet.getPane('drPane').style.zIndex = 650; // above markerPane (600)
+      leaflet.getPane('drPane').style.pointerEvents = 'none';
+    }
+    if (!leaflet.getPane('selPane')) {
+      leaflet.createPane('selPane');
+      leaflet.getPane('selPane').style.zIndex = 700; // above everything
+      leaflet.getPane('selPane').style.pointerEvents = 'none';
+    }
+  }
+
   function updateLeaflet(entities) {
     if (!leaflet) return;
+    ensurePanes();
     const list = entities || lastEntities || [];
     const seen = new Set();
     for (const e of list) {
@@ -623,16 +878,15 @@ const MapView = (() => {
         }
         m.addTo(leaflet); markers.set(e.key, m);
         m.bindTooltip(label, { permanent: false, sticky: true });
-        m.on('click', () => { if (onEntityClick) onEntityClick(e.key); });
+        m.on('click', (ev) => { window.L.DomEvent.stopPropagation(ev); if (onEntityClick) onEntityClick(e.key); });
       } else {
-        // If milsymbol just became available, switch marker type
         const isMilMarker = !m.setStyle;
         if (milIcon && !isMilMarker) {
           leaflet.removeLayer(m);
           m = window.L.marker([e.lat, e.lon], { icon: milIcon });
           m.addTo(leaflet); markers.set(e.key, m);
           m.bindTooltip(label, { permanent: false, sticky: true });
-          m.on('click', () => { if (onEntityClick) onEntityClick(e.key); });
+          m.on('click', (ev) => { window.L.DomEvent.stopPropagation(ev); if (onEntityClick) onEntityClick(e.key); });
         } else {
           m.setLatLng([e.lat, e.lon]);
           if (milIcon) {
@@ -644,9 +898,106 @@ const MapView = (() => {
           if (m.getTooltip()?.getContent() !== label) m.setTooltipContent(label);
         }
       }
+
+      // Show/hide ground-truth marker based on DR mode
+      const gtVisible = !(showDR && !showBoth);
+      if (m.setOpacity) {
+        m.setOpacity(gtVisible ? 1 : 0);
+      } else if (m.setStyle) {
+        m.setStyle({ opacity: gtVisible ? 1 : 0, fillOpacity: gtVisible ? 0.8 : 0 });
+      }
+
+      // Direction arrow (shaft + arrowhead), scaled to zoom level
+      if (showDirections && isFinite(e.heading)) {
+        const d = headingLineMeters(e.lat);
+        const ep = headingEndpoint(e.lat, e.lon, e.heading, d);
+        let dl = dirLines.get(e.key);
+        if (!dl) {
+          dl = window.L.polyline([[e.lat, e.lon], ep], { color: '#3fb950', weight: 2, interactive: false }).addTo(leaflet);
+          dirLines.set(e.key, dl);
+        } else {
+          dl.setLatLngs([[e.lat, e.lon], ep]);
+        }
+        // Pointy arrowhead: tip at ep, two wings set back and offset perpendicular
+        const wingBack = headingEndpoint(e.lat, e.lon, e.heading, d * 0.72);
+        const leftWing  = headingEndpoint(wingBack[0], wingBack[1], e.heading - 90, d * 0.09);
+        const rightWing = headingEndpoint(wingBack[0], wingBack[1], e.heading + 90, d * 0.09);
+        const arrowPts = [ep, leftWing, rightWing];
+        let da = dirArrows.get(e.key);
+        if (!da) {
+          da = window.L.polygon(arrowPts, { color: '#3fb950', fillColor: '#3fb950', fillOpacity: 1, weight: 1, interactive: false }).addTo(leaflet);
+          dirArrows.set(e.key, da);
+        } else {
+          da.setLatLngs(arrowPts);
+        }
+      } else {
+        const dl = dirLines.get(e.key);
+        if (dl) { leaflet.removeLayer(dl); dirLines.delete(e.key); }
+        const da = dirArrows.get(e.key);
+        if (da) { leaflet.removeLayer(da); dirArrows.delete(e.key); }
+      }
+
+      // DR position marker — in drPane (z 650) so it renders above entity markers
+      const drPos = (showDR || showBoth) ? computeDrPosition(e) : null;
+      if (drPos && isFinite(drPos.lat) && isFinite(drPos.lon)) {
+        let dm = drMarkers.get(e.key);
+        if (!dm) {
+          dm = window.L.circleMarker([drPos.lat, drPos.lon], {
+            pane: 'drPane', radius: 7, color: '#3fb950', fillColor: col,
+            fillOpacity: 0.5, weight: 2, interactive: false, opacity: 0.8,
+          }).addTo(leaflet);
+          drMarkers.set(e.key, dm);
+        } else {
+          dm.setLatLng([drPos.lat, drPos.lon]);
+        }
+      } else {
+        const dm = drMarkers.get(e.key);
+        if (dm) { leaflet.removeLayer(dm); drMarkers.delete(e.key); }
+      }
+
+      // Keep pulse ring on top of entity if it moved
+      if (isSelected && pulseRing) pulseRing.setLatLng([e.lat, e.lon]);
+
+      // History trail
+      if (showHistory) {
+        let hist = posHistory.get(e.key);
+        if (!hist) { hist = []; posHistory.set(e.key, hist); }
+        const last = hist[hist.length - 1];
+        if (!last || last.lat !== e.lat || last.lon !== e.lon) {
+          hist.push({ lat: e.lat, lon: e.lon });
+          if (hist.length > historyLength) hist.shift();
+        }
+        const oldLayers = historyLayers.get(e.key) || [];
+        for (const l of oldLayers) leaflet.removeLayer(l);
+        const newLayers = [];
+        if (hist.length >= 2) {
+          const CHUNKS = Math.min(15, hist.length - 1);
+          const chunkSize = Math.ceil((hist.length - 1) / CHUNKS);
+          for (let c = 0; c < CHUNKS; c++) {
+            const start = c * chunkSize;
+            const end = Math.min(start + chunkSize + 1, hist.length);
+            if (start >= hist.length - 1) break;
+            const pts = hist.slice(start, end).map(p => [p.lat, p.lon]);
+            if (pts.length < 2) continue;
+            const opacity = Math.round(((c + 1) / CHUNKS) * 0.85 * 100) / 100;
+            const l = window.L.polyline(pts, { color: historyColor, weight: 2, opacity, smoothFactor: 1, interactive: false }).addTo(leaflet);
+            newLayers.push(l);
+          }
+        }
+        historyLayers.set(e.key, newLayers);
+      } else {
+        const old = historyLayers.get(e.key);
+        if (old) { for (const l of old) leaflet.removeLayer(l); historyLayers.delete(e.key); }
+      }
     }
     for (const [k, m] of markers) {
-      if (!seen.has(k)) { leaflet.removeLayer(m); markers.delete(k); }
+      if (!seen.has(k)) {
+        leaflet.removeLayer(m); markers.delete(k);
+        const dl = dirLines.get(k); if (dl) { leaflet.removeLayer(dl); dirLines.delete(k); }
+        const da = dirArrows.get(k); if (da) { leaflet.removeLayer(da); dirArrows.delete(k); }
+        const dm = drMarkers.get(k); if (dm) { leaflet.removeLayer(dm); drMarkers.delete(k); }
+        const hl = historyLayers.get(k); if (hl) { for (const l of hl) leaflet.removeLayer(l); historyLayers.delete(k); }
+      }
     }
   }
 
@@ -674,26 +1025,52 @@ const MapView = (() => {
         if (!leaflet) {
           leaflet = window.L.map(leafletEl).setView([51.2, -1.8], 8);
           window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 18, attribution: '© OpenStreetMap',
+            maxZoom: 22, maxNativeZoom: 19, attribution: '© OpenStreetMap',
           }).addTo(leaflet);
+          leaflet.on('click', () => { if (onEntityClick) onEntityClick(null); });
+          leaflet.on('zoomend', () => updateLeaflet());
         }
-        setTimeout(() => leaflet.invalidateSize(), 100);
-        const b = bounds(lastEntities);
-        if (b) leaflet.fitBounds([[b.minLat, b.minLon], [b.maxLat, b.maxLon]]);
+        setTimeout(() => {
+          leaflet.invalidateSize();
+          // Restore view after size is known
+          if (leafletSyncView) {
+            leaflet.setView([leafletSyncView.lat, leafletSyncView.lon], leafletSyncView.zoom);
+          } else if (canvasSyncView) {
+            const { minLat, maxLat, minLon, maxLon } = canvasSyncView;
+            if (isFinite(minLat) && isFinite(maxLat))
+              leaflet.fitBounds([[minLat, minLon], [maxLat, maxLon]]);
+          } else {
+            const bv = bounds(lastEntities);
+            if (bv) leaflet.fitBounds([[bv.minLat, bv.minLon], [bv.maxLat, bv.maxLon]]);
+          }
+        }, 100);
         updateLeaflet();
-        if (infoEl) infoEl.textContent = 'online tiles';
+        // Restore pulse ring for any already-selected entity
+        if (pulseRing) { leaflet.removeLayer(pulseRing); pulseRing = null; }
+        if (selectedKey) {
+          const ent = lastEntities.find(x => x.key === selectedKey);
+          if (ent && isFinite(ent.lat) && isFinite(ent.lon)) pulseRing = makePulseRing(ent.lat, ent.lon);
+        }
+        if (infoEl) infoEl.innerHTML = '<span class="map-source-pill on">online</span>';
+        if (needsLoop()) ensureLoop();
       } catch (err) {
         console.error('Leaflet tile error:', err);
         useTiles = false;
-        if (infoEl) infoEl.textContent = 'tiles unavailable — offline view';
+        if (infoEl) infoEl.innerHTML = '<span class="map-source-pill err">offline (tiles unavailable)</span>';
         canvas.classList.remove('hidden'); leafletEl.classList.add('hidden');
         draw();
       }
     } else {
+      if (pulseRing && leaflet) { leaflet.removeLayer(pulseRing); pulseRing = null; }
+      // Save Leaflet view so we can restore it if switching back
+      if (leaflet) {
+        const c = leaflet.getCenter();
+        leafletSyncView = { lat: c.lat, lon: c.lng, zoom: leaflet.getZoom() };
+      }
       leafletEl.classList.add('hidden');
       canvas.classList.remove('hidden');
-      if (infoEl) infoEl.textContent = 'offline canvas';
-      draw();
+      if (infoEl) infoEl.innerHTML = '<span class="map-source-pill off">offline</span>';
+      if (needsLoop()) ensureLoop(); else draw();
     }
   }
 
@@ -703,7 +1080,32 @@ const MapView = (() => {
     else draw();
   }
 
-  return { init, update, setTiles, resetView, setSelected, setSymbolSize, entityToSidc, entityToSidcLabel, resize: triggerResize };
+  function setShowDirections(on) {
+    showDirections = on;
+    if (useTiles) updateLeaflet(); else draw();
+  }
+
+  function setShowDR(on, both) {
+    showDR = on; showBoth = !!both;
+    if (useTiles) updateLeaflet(); else draw();
+    if (needsLoop()) ensureLoop(); else stopLoop();
+  }
+
+  function setFollow(on) { followSelected = on; }
+
+  function setHistory(on, length, color) {
+    showHistory = on;
+    if (length) historyLength = Math.max(10, Math.min(500, length));
+    if (color) historyColor = color;
+    if (!on) {
+      for (const layers of historyLayers.values()) for (const l of layers) leaflet?.removeLayer(l);
+      historyLayers.clear();
+      posHistory.clear();
+    }
+    if (needsLoop()) ensureLoop(); else draw();
+  }
+
+  return { init, update, setTiles, resetView, setSelected, setSymbolSize, setShowDirections, setShowDR, setFollow, setHistory, entityToSidc, entityToSidcLabel, resize: triggerResize };
 })();
 
 window.MapView = MapView;

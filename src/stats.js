@@ -28,6 +28,7 @@ export class Stats {
     this.signalStates = new Map();  // entityKey|radioId -> latest signal state
     this.startTime = Date.now();
     this.rateWindow = [];           // timestamps (ms) for PDU/s estimate
+    this.byteRateWindow = [];       // {t, b} pairs for MB/s estimate
   }
 
   // header: parsed common header. body: decoded body (may be null).
@@ -47,11 +48,15 @@ export class Stats {
 
     this.rateWindow.push(now);
     if (this.rateWindow.length > 2000) this.rateWindow.shift();
+    this.byteRateWindow.push({ t: now, b: byteLen || 0 });
+    if (this.byteRateWindow.length > 5000) this.byteRateWindow.shift();
 
     if (header.pduType === 1 && body && body.entityIdKey) {
       this.entities.set(body.entityIdKey, {
         key: body.entityIdKey,
         marking: body.marking || body.entityIdKey,
+        siteId: body.entityId?.site,
+        appId: body.entityId?.application,
         force: body.forceName,
         forceId: body.forceId,
         type: body.entityTypeString,
@@ -117,7 +122,7 @@ export class Stats {
         entityKey: body.entityIdKey,
         radioId: body.radioId,
         txState: body.txState,
-        txStateName: body.txState === 1 ? 'On' : 'Off',
+        txStateName: body.txState === 2 ? 'Transmitting' : body.txState === 1 ? 'On (idle)' : 'Off',
         frequency: body.frequency,
         freqMHz: body.frequency ? +(body.frequency / 1e6).toFixed(3) : 0,
         band: body.band,
@@ -157,6 +162,21 @@ export class Stats {
       if (this.rateWindow[i] >= cutoff) n += 1; else break;
     }
     return n;
+  }
+
+  byteRate() {
+    const now = Date.now();
+    const cutoff = now - 1000;
+    let bytes = 0;
+    for (let i = this.byteRateWindow.length - 1; i >= 0; i--) {
+      if (this.byteRateWindow[i].t >= cutoff) bytes += this.byteRateWindow[i].b;
+      else break;
+    }
+    return bytes;
+  }
+
+  setEntityTimeout(secs) {
+    this.entityTtlMs = Math.max(secs * 1000 * 3, 12000);
   }
 
   snapshot() {
@@ -211,6 +231,7 @@ export class Stats {
       totalPdus: this.totalPdus,
       totalBytes: this.totalBytes,
       pduRate: this.pduRate(),
+      byteRate: this.byteRate(),
       entityCount: this.entities.size,
       emitterCount: this.emitters.size,
       types,

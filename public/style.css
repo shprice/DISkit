@@ -155,6 +155,7 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 }
 .metric span { display: block; font-size: 20px; font-weight: 600; }
 .metric label { justify-content: center; text-align: center; color: var(--muted); }
+.metric-graph canvas { display: block; width: 100%; height: 28px; margin-top: 4px; }
 
 /* Horizontal three-pie layout */
 .pietriptych { display: flex; gap: 10px; align-items: flex-start; margin-top: 6px; }
@@ -200,6 +201,8 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .sel-table tbody tr { cursor: pointer; }
 .sel-table tbody tr:hover { background: rgba(255,255,255,0.04); }
 .sel-table tbody tr.selected { background: rgba(47,129,247,0.15); outline: none; }
+.sel-table tbody tr.tx-active { color: var(--green); }
+.sel-table tbody tr.tx-active td:nth-child(3) { font-weight: 600; }
 
 .details { grid-area: details; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .details > h3 { flex-shrink: 0; }
@@ -219,7 +222,39 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 }
 .detail-symbol { text-align: center; margin-bottom: 6px; }
 .enum-type { color: var(--accent); }
+/* Full-width detail row (for long inferred type labels) */
+.detail-wide-label { /* same as dt, no override needed */ }
+.detail-wide-value { grid-column: 2 / -1; color: var(--accent); word-break: break-word; margin: 0; }
+/* Filter indicators */
+.tab-filter-icon {
+  display: inline-block; width: 10px; height: 10px; margin-left: 4px; vertical-align: middle;
+  clip-path: polygon(0% 0%, 100% 0%, 65% 48%, 65% 88%, 35% 88%, 35% 48%);
+  background: var(--amber);
+}
+.filter-pill {
+  display: inline-block; padding: 2px 8px; background: #2e2012; color: var(--amber);
+  border-radius: 10px; font-size: 11px; margin: 4px 0;
+}
+/* Site/App names table */
+.names-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6px; }
+.names-table th, .names-table td { padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--line); }
+.names-table th { color: var(--muted); font-weight: normal; }
 .mil-icon { background: none !important; border: none !important; }
+
+/* Leaflet selection pulse ring — CSS animation, no JS required */
+.map-sel-pulse {
+  width: 88px; height: 88px;
+  border: 2.5px solid rgba(210, 160, 20, 0.95);
+  border-radius: 50%;
+  box-sizing: border-box;
+  animation: map-sel-pulse 1.2s ease-in-out infinite;
+  pointer-events: none;
+  position: absolute; top: 0; left: 0;
+}
+@keyframes map-sel-pulse {
+  0%, 100% { transform: scale(0.65); opacity: 1; }
+  50%       { transform: scale(1.25); opacity: 0.1; }
+}
 
 .tablewrap { flex: 1; overflow: auto; min-height: 0; }
 table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -295,23 +330,54 @@ tr.stale-red { background: rgba(248, 81, 73, 0.07); }
 }
 .tl-mark:hover .tl-tip { display: block; }
 
-/* Symbol-scale slider overlay on the map */
-.sym-scale-ctrl {
-  position: absolute; right: 10px; top: 10px; z-index: 1000;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  background: rgba(22, 27, 34, 0.88); border: 1px solid var(--line);
-  border-radius: 6px; padding: 6px 5px; pointer-events: auto;
+/* Map settings popup */
+.map-settings-wrap { position: relative; }
+.map-settings-popup {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 2000;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 0; min-width: 220px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
 }
-.sym-scale-lbl { font-size: 12px; color: var(--muted); line-height: 1; user-select: none; }
-#symScale {
-  -webkit-appearance: slider-vertical;
-  writing-mode: vertical-lr;
-  direction: rtl;
-  width: 22px; height: 72px;
+.map-settings-sep { height: 1px; background: var(--line); margin: 6px 0; }
+.sw-field {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 14px; gap: 12px;
+}
+.sw-field > label:first-child { font-size: 13px; color: var(--fg); cursor: pointer; flex: 1; }
+.sw-field.sw-range { gap: 10px; }
+.sw-field.sw-range input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+.sw {
+  position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; cursor: pointer;
+}
+.sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+.sw-track {
+  position: absolute; inset: 0; background: var(--panel2); border-radius: 10px;
+  border: 1px solid var(--line); transition: background .18s, border-color .18s;
+}
+.sw-track::after {
+  content: ''; position: absolute; left: 2px; top: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--muted); transition: transform .18s, background .18s;
+}
+.sw input:checked + .sw-track { background: var(--accent); border-color: var(--accent); }
+.sw input:checked + .sw-track::after { transform: translateX(16px); background: #fff; }
+.sw input:disabled + .sw-track { opacity: 0.4; }
+.sw-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+/* Map source pill */
+.map-source-pill {
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px; font-weight: 600;
   cursor: pointer;
-  accent-color: var(--accent);
-  margin: 0;
 }
+.map-source-pill.on  { background: #16331c; color: var(--green); }
+.map-source-pill.off { background: #2a2f38; color: var(--muted); }
+.map-source-pill.err { background: #3a2226; color: var(--red); }
+/* Maphead actions group */
+.maphead-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* PDU Monitor header */
+.monitor-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.monitor-head h3 { margin: 0; }
+.monitor-settings-wrap { position: relative; }
 
 /* Fire / Detonation flash badge in header */
 #evtFlashContainer { display: flex; gap: 6px; align-items: center; }

@@ -15,5 +15,5 @@
     "ttl": 16
   },
   "logDir": "logs",
-  "entityTimeoutSecs": 5
+  "entityTimeoutSecs": 10
 }

@@ -119,7 +119,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // ---- Shared state ----------------------------------------------------------
-const stats = new Stats({ entityTimeoutSecs: config.entityTimeoutSecs ?? 5 });
+const stats = new Stats({ entityTimeoutSecs: config.entityTimeoutSecs ?? 10 });
 let capture = null;
 let player = null;
 let mode = 'idle'; // idle | capturing | replaying
@@ -364,6 +364,21 @@ wss.on('connection', (ws) => {
           const foundLogs = listLogs();
           broadcast({ kind: 'dirs', recordDir, browseDir, message: `Save location set to ${dir}` });
           broadcast({ kind: 'logs', logs: foundLogs, browseDir });
+          break;
+        }
+        case 'setEntityTimeout': {
+          const secs = Math.max(1, Math.min(3600, +m.secs || 10));
+          config.entityTimeoutSecs = secs;
+          stats.setEntityTimeout(secs);
+          try { fs.writeFileSync(configPath, JSON.stringify(config, null, 2)); } catch {}
+          broadcast({ kind: 'config', entityTimeoutSecs: secs });
+          break;
+        }
+        case 'setSiteAppNames': {
+          config.siteNames = m.siteNames || {};
+          config.appNames  = m.appNames  || {};
+          try { fs.writeFileSync(configPath, JSON.stringify(config, null, 2)); } catch {}
+          broadcast({ kind: 'config', siteNames: config.siteNames, appNames: config.appNames });
           break;
         }
         case 'exportPcap': {
