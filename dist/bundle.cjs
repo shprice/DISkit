@@ -29586,6 +29586,7 @@ function decodeSignal(buf) {
   o += 2;
   const numSamples = buf.readUInt16BE(o);
   o += 2;
+  const audioData = buf.length > o ? buf.subarray(o) : null;
   const key = `${entityIdKey(entityId)}|${radioId}`;
   return {
     entityId,
@@ -29599,6 +29600,7 @@ function decodeSignal(buf) {
     sampleRate,
     dataLengthBits,
     numSamples,
+    audioData,
     _key: key
   };
 }
@@ -30556,6 +30558,40 @@ function pickFolder(initialDir) {
   });
 }
 
+// src/audio.js
+var MULAW_TABLE = (() => {
+  const t = new Int16Array(256);
+  for (let i = 0; i < 256; i++) {
+    const b = ~i & 255;
+    const sign = b & 128;
+    const exp = b >> 4 & 7;
+    const mant = b & 15;
+    let val = (mant << 1) + 33 << exp;
+    val -= 33;
+    t[i] = sign ? -val : val;
+  }
+  return t;
+})();
+function decodeAudioPayload(encodingClass, encodingType, data) {
+  if (encodingClass !== 0 || !data || data.length === 0) return null;
+  if (encodingType === 1) {
+    const out = Buffer.allocUnsafe(data.length * 2);
+    for (let i = 0; i < data.length; i++) out.writeInt16LE(MULAW_TABLE[data[i] & 255], i * 2);
+    return out;
+  }
+  if (encodingType === 4) {
+    const out = Buffer.allocUnsafe(data.length & ~1);
+    for (let i = 0; i < out.length; i += 2) out.writeInt16LE(data.readInt16BE(i), i);
+    return out;
+  }
+  if (encodingType === 5) {
+    const out = Buffer.allocUnsafe(data.length * 2);
+    for (let i = 0; i < data.length; i++) out.writeInt16LE((data[i] - 128) * 256, i * 2);
+    return out;
+  }
+  return null;
+}
+
 // src/server.js
 var import_meta = {};
 function getLocalBroadcastAddress() {
@@ -30650,8 +30686,34 @@ function broadcast(obj) {
     if (client.readyState === 1) client.send(msg);
   }
 }
+var audioSeqMap = /* @__PURE__ */ new Map();
+function broadcastAudio(key, sampleRate, pcmBuf) {
+  const seq = (audioSeqMap.get(key) || 0) + 1 & 4294967295;
+  audioSeqMap.set(key, seq);
+  const keyBuf = Buffer.from(key, "utf8");
+  const frame = Buffer.allocUnsafe(9 + keyBuf.length + pcmBuf.length);
+  let o = 0;
+  frame[o++] = 2;
+  frame.writeUInt32BE(seq, o);
+  o += 4;
+  frame.writeUInt16BE(sampleRate, o);
+  o += 2;
+  frame.writeUInt16BE(keyBuf.length, o);
+  o += 2;
+  keyBuf.copy(frame, o);
+  o += keyBuf.length;
+  pcmBuf.copy(frame, o);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(frame);
+  }
+}
 var sampleBuffer = [];
 function onSample(sample) {
+  if (sample.header.pduType === 26 && sample.body?.encodingClass === 0) {
+    const b = sample.body;
+    const pcm = decodeAudioPayload(b.encodingClass, b.encodingType, b.audioData);
+    if (pcm && pcm.length > 0) broadcastAudio(b._key, b.sampleRate || 8e3, pcm);
+  }
   sampleBuffer.push({
     type: sample.header.pduType,
     name: sample.header.pduTypeName,

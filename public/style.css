@@ -409,3 +409,23 @@ main.map-expanded .details { display: none; }
   main { grid-template-columns: 1fr; grid-template-areas:
     "control" "stats" "map" "monitor" "details"; }
 }
+
+/* Audio mixer */
+.audio-device-sel { font-size: 11px; background: var(--bg); border: 1px solid var(--line); color: var(--fg); border-radius: 4px; padding: 2px 6px; flex: 1; }
+/* Gear button on audio signal rows */
+.audio-gear-btn { padding: 1px 5px; font-size: 12px; line-height: 1.4; }
+/* Active signal row (audio in progress) */
+.sel-table tbody tr.sig-active { color: var(--green); }
+.sel-table tbody tr.sig-active .audio-gear-btn { border-color: var(--green); color: var(--green); }
+/* Floating audio settings popup */
+.audio-popup {
+  position: fixed; z-index: 9000; min-width: 200px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.audio-popup-title { font-size: 11px; color: var(--muted); margin-bottom: 8px; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-popup-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.audio-popup-row input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; height: 18px; }
+.audio-lbl { flex: 0 0 auto; font-size: 10px; color: var(--muted); min-width: 20px; text-align: center; }
+.audio-mute-btn { width: 100%; margin-top: 2px; }
+.audio-mute-btn.muted { color: var(--muted); }

@@ -68,6 +68,7 @@ let entityTimeoutMs = 10000;  // from config.entityTimeoutSecs; amber at ½, red
 let siteNames = {};  // { "100": "Site A" }
 const dataRateHistory = [];
 const pduRateHistory = [];
+const activeAudioKeys = new Map(); // key → timeout id
 const RATE_HISTORY_MAX = 240;
 let appNames = {};   // { "1": "Blue Force" }
 
@@ -76,9 +77,15 @@ function $(id) { return document.getElementById(id); }
 function connect() {
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
   ws = new WebSocket(`ws://${location.host}`);
+  ws.binaryType = 'arraybuffer';
   ws.onopen = () => setConn(true);
   ws.onclose = () => { setConn(false); setTimeout(connect, 1500); };
   ws.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) {
+      const f = parseAudioFrame(ev.data);
+      if (f) { window.AudioMgr?.ingestFrame(f.key, f.sampleRate, f.pcm); markAudioActive(f.key); }
+      return;
+    }
     try { handle(JSON.parse(ev.data)); } catch (err) { console.error('WS error:', err); }
   };
 }
@@ -292,6 +299,20 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+function parseAudioFrame(ab) {
+  if (!(ab instanceof ArrayBuffer) || ab.byteLength < 10) return null;
+  const v = new DataView(ab);
+  if (v.getUint8(0) !== 0x02) return null;
+  const seq = v.getUint32(1, false);
+  const sampleRate = v.getUint16(5, false);
+  const keyLen = v.getUint16(7, false);
+  if (ab.byteLength < 9 + keyLen + 2) return null;
+  const key = new TextDecoder().decode(new Uint8Array(ab, 9, keyLen));
+  const pcmOffset = 9 + keyLen;
+  const pcm = new Int16Array(ab.slice(pcmOffset));
+  return { seq, sampleRate, key, pcm };
+}
+
 function fmtBytes(b) {
   if (!b) return '0 KB';
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
@@ -427,13 +448,19 @@ function renderStats(s) {
   }
   const sigb = $('sigTableBody');
   if (sigb) {
-    sigb.innerHTML = (s.signals || []).map(sg => `
-      <tr data-key="${escapeHtml(sg._key)}">
+    sigb.innerHTML = (s.signals || []).map(sg => {
+      const isAudio = sg.encodingClass === 0;
+      const active = activeAudioKeys.has(sg._key);
+      const gearCell = isAudio
+        ? `<td><button class="audio-gear-btn mini" data-key="${escapeHtml(sg._key)}" title="Audio settings">⚙</button></td>`
+        : '<td></td>';
+      return `<tr data-key="${escapeHtml(sg._key)}"${active ? ' class="sig-active"' : ''}>
         <td>${escapeHtml(sg.entityIdKey)}</td><td>${sg.radioId}</td>
         <td>${escapeHtml(sg.encodingClassName || '—')}</td>
         <td>${escapeHtml(sg.tdlTypeName || '—')}</td>
-        <td>${sg.sampleRate || 0}</td><td>${sg.dataLengthBits || 0}</td>
-      </tr>`).join('');
+        <td>${sg.sampleRate || 0}</td><td>${sg.dataLengthBits || 0}</td>${gearCell}
+      </tr>`;
+    }).join('');
   }
 
   const fb = $('firesTableBody');
@@ -558,6 +585,47 @@ function drawSparkline(canvasId, history) {
     i === startIdx ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   });
   ctx.stroke();
+}
+
+let _audioPopupKey = null;
+
+function markAudioActive(key) {
+  if (activeAudioKeys.has(key)) clearTimeout(activeAudioKeys.get(key));
+  const tid = setTimeout(() => {
+    activeAudioKeys.delete(key);
+    document.querySelectorAll(`#sigTableBody tr[data-key="${CSS.escape(key)}"]`)
+      .forEach(r => r.classList.remove('sig-active'));
+  }, 2500);
+  activeAudioKeys.set(key, tid);
+  document.querySelectorAll(`#sigTableBody tr[data-key="${CSS.escape(key)}"]`)
+    .forEach(r => r.classList.add('sig-active'));
+}
+
+function showAudioPopup(key, anchorEl) {
+  _audioPopupKey = key;
+  const popup = $('audioPopup');
+  const ch = window.AudioMgr?.getChannels().find(c => c.key === key);
+  $('audioPopupTitle').textContent = key;
+  $('audioPanSlider').value = Math.round((ch?.pan || 0) * 100);
+  $('audioVolSlider').value = Math.round((ch?.gain ?? 1) * 100);
+  const muted = !!ch?.muted;
+  $('audioMuteBtn').textContent = muted ? 'Unmute' : 'Mute';
+  $('audioMuteBtn').classList.toggle('muted', muted);
+  const rect = anchorEl.getBoundingClientRect();
+  popup.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  const left = Math.min(rect.left, window.innerWidth - 220);
+  popup.style.left = Math.max(4, left) + 'px';
+  popup.classList.remove('hidden');
+  // Populate audio device list (requires prior audio activity for labels to appear)
+  window.AudioMgr?.enumerateOutputDevices().then(devs => {
+    const sel = $('audioDevice');
+    const row = sel?.closest('.audio-dev-row');
+    if (!sel || !row) return;
+    if (devs.length === 0) { row.classList.add('hidden'); return; }
+    const cur = sel.value;
+    sel.innerHTML = devs.map(d => `<option value="${escapeHtml(d.deviceId)}"${d.deviceId === cur ? ' selected' : ''}>${escapeHtml(d.label || 'Device ' + d.deviceId.slice(0,8))}</option>`).join('');
+    row.classList.remove('hidden');
+  });
 }
 
 function renderDetails(data) {
@@ -1247,6 +1315,7 @@ function init() {
     if (t) selectItem(tr.dataset.key, 'transmitter', t);
   });
   $('sigTable')?.addEventListener('click', e => {
+    if (e.target.closest('.audio-gear-btn')) return;
     const tr = e.target.closest('tr[data-key]');
     if (!tr) return;
     const sg = lastStats?.signals?.find(x => x._key === tr.dataset.key);
@@ -1274,6 +1343,38 @@ function init() {
      : ageMs >= entityTimeoutMs / 2 ? ' stale-amber'
      : '');
   }, 1000);
+
+  // Audio popup — persistent controls, no innerHTML replacement during interaction
+  $('audioPanSlider').oninput = () => {
+    if (_audioPopupKey) window.AudioMgr?.setPan(_audioPopupKey, +$('audioPanSlider').value / 100);
+  };
+  $('audioVolSlider').oninput = () => {
+    if (_audioPopupKey) window.AudioMgr?.setGain(_audioPopupKey, +$('audioVolSlider').value / 100);
+  };
+  $('audioMuteBtn').onclick = () => {
+    if (!_audioPopupKey) return;
+    const ch = window.AudioMgr?.getChannels().find(c => c.key === _audioPopupKey);
+    window.AudioMgr?.setMute(_audioPopupKey, !ch?.muted);
+    const nowMuted = !ch?.muted;
+    $('audioMuteBtn').textContent = nowMuted ? 'Unmute' : 'Mute';
+    $('audioMuteBtn').classList.toggle('muted', nowMuted);
+  };
+  document.addEventListener('click', e => {
+    if (!$('audioPopup').classList.contains('hidden') &&
+        !$('audioPopup').contains(e.target) &&
+        !e.target.closest('.audio-gear-btn')) {
+      $('audioPopup').classList.add('hidden');
+      _audioPopupKey = null;
+    }
+  });
+  // Gear button clicks in signals table
+  $('sigTable')?.addEventListener('click', e => {
+    const btn = e.target.closest('.audio-gear-btn');
+    if (btn) { e.stopPropagation(); showAudioPopup(btn.dataset.key, btn); }
+  });
+  // Audio device selector — wire once; populated when popup opens
+  const audioSel = $('audioDevice');
+  if (audioSel) audioSel.onchange = () => window.AudioMgr?.setOutputDevice(audioSel.value);
 
   connect();
 }

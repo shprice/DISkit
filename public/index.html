@@ -318,7 +318,7 @@
       <div class="ptabbody hidden" id="ptab-signals">
         <div class="tablewrap">
           <table id="sigTable" class="sel-table">
-            <thead><tr><th>Entity</th><th>Radio</th><th>Encoding</th><th>TDL</th><th>Rate Hz</th><th>Bits</th></tr></thead>
+            <thead><tr><th>Entity</th><th>Radio</th><th>Encoding</th><th>TDL</th><th>Rate Hz</th><th>Bits</th><th></th></tr></thead>
             <tbody id="sigTableBody"></tbody>
           </table>
         </div>
@@ -347,6 +347,25 @@
 
   <script src="milsymbol.js"></script>
   <script src="map.js"></script>
+  <script src="audio.js"></script>
   <script src="app.js"></script>
+
+<div id="audioPopup" class="audio-popup hidden">
+  <div class="audio-popup-title" id="audioPopupTitle"></div>
+  <div class="audio-popup-row">
+    <span class="audio-lbl">L</span>
+    <input type="range" id="audioPanSlider" min="-100" max="100" step="1" value="0">
+    <span class="audio-lbl">R</span>
+  </div>
+  <div class="audio-popup-row">
+    <span class="audio-lbl">Vol</span>
+    <input type="range" id="audioVolSlider" min="0" max="100" step="1" value="100">
+  </div>
+  <button id="audioMuteBtn" class="audio-mute-btn">Mute</button>
+  <div class="audio-popup-row audio-dev-row hidden">
+    <span class="audio-lbl">Out</span>
+    <select id="audioDevice" class="audio-device-sel" title="Audio output device"></select>
+  </div>
+</div>
 </body>
 </html>

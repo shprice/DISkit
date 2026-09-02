@@ -17,6 +17,7 @@ import { Stats } from './stats.js';
 import { exportToPcap, exportToPcapBuffer } from './pcap.js';
 import { readMeta, updateMeta } from './logformat.js';
 import { openBrowser, pickFolder } from './os-dialog.js';
+import { decodeAudioPayload } from './audio.js';
 
 export function getLocalBroadcastAddress() {
   const interfaces = os.networkInterfaces();
@@ -133,8 +134,31 @@ function broadcast(obj) {
   }
 }
 
+const audioSeqMap = new Map();
+function broadcastAudio(key, sampleRate, pcmBuf) {
+  const seq = ((audioSeqMap.get(key) || 0) + 1) & 0xFFFFFFFF;
+  audioSeqMap.set(key, seq);
+  const keyBuf = Buffer.from(key, 'utf8');
+  const frame = Buffer.allocUnsafe(9 + keyBuf.length + pcmBuf.length);
+  let o = 0;
+  frame[o++] = 0x02;
+  frame.writeUInt32BE(seq, o); o += 4;
+  frame.writeUInt16BE(sampleRate, o); o += 2;
+  frame.writeUInt16BE(keyBuf.length, o); o += 2;
+  keyBuf.copy(frame, o); o += keyBuf.length;
+  pcmBuf.copy(frame, o);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(frame);
+  }
+}
+
 const sampleBuffer = [];
 function onSample(sample) {
+  if (sample.header.pduType === 26 && sample.body?.encodingClass === 0) {
+    const b = sample.body;
+    const pcm = decodeAudioPayload(b.encodingClass, b.encodingType, b.audioData);
+    if (pcm && pcm.length > 0) broadcastAudio(b._key, b.sampleRate || 8000, pcm);
+  }
   sampleBuffer.push({
     type: sample.header.pduType,
     name: sample.header.pduTypeName,

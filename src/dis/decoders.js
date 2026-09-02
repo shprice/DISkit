@@ -301,12 +301,13 @@ function decodeSignal(buf) {
   const sampleRate = buf.readUInt32BE(o); o += 4;
   const dataLengthBits = buf.readUInt16BE(o); o += 2;
   const numSamples = buf.readUInt16BE(o); o += 2;
+  const audioData = buf.length > o ? buf.subarray(o) : null;
   const key = `${entityIdKey(entityId)}|${radioId}`;
   return {
     entityId, entityIdKey: entityIdKey(entityId), radioId,
     encodingClass, encodingClassName: ENCODING_CLASS_NAMES[encodingClass] || 'Unknown',
     encodingType, tdlType, tdlTypeName: TDL_TYPE_NAMES[tdlType] || `TDL ${tdlType}`,
-    sampleRate, dataLengthBits, numSamples, _key: key,
+    sampleRate, dataLengthBits, numSamples, audioData, _key: key,
   };
 }
 
