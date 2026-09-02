@@ -83,7 +83,15 @@ function connect() {
   ws.onmessage = (ev) => {
     if (ev.data instanceof ArrayBuffer) {
       const f = parseAudioFrame(ev.data);
-      if (f) { window.AudioMgr?.ingestFrame(f.key, f.sampleRate, f.pcm); markAudioActive(f.key); }
+      if (f) {
+        if (!window._audioDiagDone) {
+          window._audioDiagDone = true;
+          const s = Array.from(f.pcm.slice(0, 8)).join(', ');
+          console.log(`[audio] key=${f.key} sampleRate=${f.sampleRate} samples=${f.pcm.length} first8=[${s}]`);
+        }
+        window.AudioMgr?.ingestFrame(f.key, f.sampleRate, f.pcm);
+        markAudioActive(f.key);
+      }
       return;
     }
     try { handle(JSON.parse(ev.data)); } catch (err) { console.error('WS error:', err); }
@@ -621,7 +629,17 @@ function showAudioPopup(key, anchorEl) {
     const sel = $('audioDevice');
     const row = sel?.closest('.audio-dev-row');
     if (!sel || !row) return;
-    if (devs.length === 0) { row.classList.add('hidden'); return; }
+    if (devs.length === 0) {
+      if (!window.isSecureContext) {
+        sel.replaceWith(Object.assign(document.createElement('span'), {
+          className: 'hint', textContent: 'Device selection requires HTTPS'
+        }));
+        row.classList.remove('hidden');
+      } else {
+        row.classList.add('hidden');
+      }
+      return;
+    }
     const cur = sel.value;
     sel.innerHTML = devs.map(d => `<option value="${escapeHtml(d.deviceId)}"${d.deviceId === cur ? ' selected' : ''}>${escapeHtml(d.label || 'Device ' + d.deviceId.slice(0,8))}</option>`).join('');
     row.classList.remove('hidden');

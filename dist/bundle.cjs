@@ -30559,6 +30559,7 @@ function pickFolder(initialDir) {
 }
 
 // src/audio.js
+var MULAW_EXP_LUT = [0, 132, 396, 924, 1980, 4092, 8316, 16764];
 var MULAW_TABLE = (() => {
   const t = new Int16Array(256);
   for (let i = 0; i < 256; i++) {
@@ -30566,8 +30567,7 @@ var MULAW_TABLE = (() => {
     const sign = b & 128;
     const exp = b >> 4 & 7;
     const mant = b & 15;
-    let val = (mant << 1) + 33 << exp;
-    val -= 33;
+    const val = MULAW_EXP_LUT[exp] + (mant << exp + 3);
     t[i] = sign ? -val : val;
   }
   return t;

@@ -1,6 +1,8 @@
 // Server-side DIS Signal PDU audio decode. Converts payload bytes to 16-bit LE PCM.
 // Supported encodingClass=0 types: 1=µ-law, 4=16-bit PCM BE, 5=8-bit unsigned PCM
 
+// ITU-T G.711 µ-law decode: segment offsets for exponents 0–7
+const MULAW_EXP_LUT = [0, 132, 396, 924, 1980, 4092, 8316, 16764];
 const MULAW_TABLE = (() => {
   const t = new Int16Array(256);
   for (let i = 0; i < 256; i++) {
@@ -8,8 +10,7 @@ const MULAW_TABLE = (() => {
     const sign = b & 0x80;
     const exp  = (b >> 4) & 0x07;
     const mant = b & 0x0F;
-    let val = ((mant << 1) + 33) << exp;
-    val -= 33;
+    const val  = MULAW_EXP_LUT[exp] + (mant << (exp + 3));
     t[i] = sign ? -val : val;
   }
   return t;
