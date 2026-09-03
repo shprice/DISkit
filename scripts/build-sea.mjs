@@ -13,6 +13,15 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const STAGING = path.join(DIST, 'diskit-dist');
 
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+let APP_VERSION;
+try {
+  APP_VERSION = execSync('git describe --tags --always --dirty', { cwd: ROOT }).toString().trim();
+} catch {
+  APP_VERSION = `v${pkg.version}`;
+}
+console.log(`Version: ${APP_VERSION}`);
+
 const isWin = os.platform() === 'win32';
 const exeName = isWin ? 'diskit.exe' : 'diskit';
 const targetExe = path.join(DIST, exeName);
@@ -29,7 +38,7 @@ fs.mkdirSync(STAGING, { recursive: true });
 // 2. Bundle application into a single CommonJS file using esbuild
 console.log('1. Bundling JavaScript with esbuild...');
 try {
-  execSync(`npx -y esbuild "${path.join(ROOT, 'src/server.js')}" --bundle --platform=node --target=node18 --format=cjs --outfile="${bundlePath}"`, {
+  execSync(`npx -y esbuild "${path.join(ROOT, 'src/server.js')}" --bundle --platform=node --target=node18 --format=cjs --define:__APP_VERSION__='"${APP_VERSION}"' --outfile="${bundlePath}"`, {
     cwd: ROOT,
     stdio: 'inherit',
   });

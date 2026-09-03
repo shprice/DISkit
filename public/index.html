@@ -12,6 +12,7 @@
     <img src="diskit.png" class="header-logo" alt="DISkit logo" />
     <h1>DISkit</h1>
     <span class="sub">IEEE 1278 DIS Toolkit</span>
+    <span id="appVersion" class="version-badge hidden"></span>
     <span id="conn" class="badge off">disconnected</span>
     <span id="modeBadge" class="badge idle">idle</span>
     <span id="recBadge" class="badge rec hidden"><span class="rec-dot" id="recDotHeader"></span><span id="recText">REC</span></span>
@@ -20,6 +21,11 @@
 
   <main>
     <section class="panel control">
+      <div class="panel-hdr" id="controlHdr">
+        <span class="panel-hdr-title">Controls</span>
+        <button class="panel-toggle-btn" aria-expanded="true" aria-label="Toggle Controls">▾</button>
+      </div>
+      <div class="panel-body">
       <div class="tabs">
         <button class="tab active" data-tab="view">View <span id="viewFilterIcon" class="tab-filter-icon hidden"></span></button>
         <button class="tab" data-tab="capture">Log</button>
@@ -167,10 +173,18 @@
           <button id="btnExportPcap">Export selected to PCAP</button>
         </div>
       </div>
+      </div><!-- /panel-body -->
     </section>
+    <div class="col-resize-handle" id="colResizeHandle"></div>
+    <div class="vert-resize-handle" id="vertResizeHandle"></div>
+    <div class="horiz-resize-handle" id="horizResizeHandle"></div>
 
     <section class="panel stats">
-      <h3>PDU Stats</h3>
+      <div class="panel-hdr">
+        <h3>PDU Stats</h3>
+        <button class="panel-toggle-btn" aria-expanded="true" aria-label="Toggle Stats">▾</button>
+      </div>
+      <div class="panel-body">
       <div class="metrics">
         <div class="metric"><span id="mPdus">0</span><label>PDUs Received</label></div>
         <div class="metric metric-graph"><span id="mRate">0</span><label>PDU/s</label><canvas id="pduRateGraph" height="28"></canvas></div>
@@ -195,6 +209,7 @@
           <div class="hint">App ID</div>
         </div>
       </div>
+      </div><!-- /panel-body -->
     </section>
 
     <section class="panel map">
@@ -246,12 +261,15 @@
               </div>
             </div>
           </div>
+          <button class="panel-toggle-btn" aria-expanded="true" aria-label="Toggle Map">▾</button>
         </div>
       </div>
+      <div class="panel-body">
       <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
         <div id="leafletMap" class="hidden"></div>
       </div>
+      </div><!-- /panel-body -->
     </section>
 
     <section class="panel monitor">
@@ -266,7 +284,9 @@
             </div>
           </div>
         </div>
+        <button class="panel-toggle-btn" aria-expanded="true" aria-label="Toggle Monitor">▾</button>
       </div>
+      <div class="panel-body">
       <div class="ptabs">
         <button class="ptab active" data-ptab="entities">Entities</button>
         <button class="ptab" data-ptab="emitters">Emissions</button>
@@ -323,13 +343,19 @@
           </table>
         </div>
       </div>
+      </div><!-- /panel-body -->
     </section>
 
     <section class="panel details">
-      <h3>Details</h3>
+      <div class="panel-hdr">
+        <h3>Details</h3>
+        <button class="panel-toggle-btn" aria-expanded="true" aria-label="Toggle Details">▾</button>
+      </div>
+      <div class="panel-body">
       <div id="detailsContent" class="details-wrap">
         <span class="hint">Select an entity or emitter</span>
       </div>
+      </div><!-- /panel-body -->
     </section>
 
   </main>

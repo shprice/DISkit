@@ -168,6 +168,7 @@ function populateAdapters(adapters, selected) {
 function handle(m) {
   switch (m.kind) {
     case 'hello':
+      if (m.version) { const vEl = $('appVersion'); if (vEl) { vEl.textContent = m.version; vEl.classList.remove('hidden'); } }
       if (m.networkAdapters) populateAdapters(m.networkAdapters, m.config?.capture?.bindAddress);
       applyConfig(m.config); $('recDir').value = m.recordDir || ''; $('browseDir').value = m.browseDir || '';
       if (m.config?.entityTimeoutSecs) {
@@ -1393,6 +1394,92 @@ function init() {
   // Audio device selector — wire once; populated when popup opens
   const audioSel = $('audioDevice');
   if (audioSel) audioSel.onchange = () => window.AudioMgr?.setOutputDevice(audioSel.value);
+
+  // Column resize handle (desktop)
+  const colHandle = document.getElementById('colResizeHandle');
+  if (colHandle) {
+    const mainEl = document.querySelector('main');
+    let dragStartX = 0, dragStartW = 0;
+    const savedW = localStorage.getItem('diskit-col1');
+    if (savedW) mainEl.style.setProperty('--col1', savedW);
+    colHandle.addEventListener('pointerdown', e => {
+      dragStartX = e.clientX;
+      dragStartW = parseInt(getComputedStyle(mainEl).getPropertyValue('--col1')) || 320;
+      colHandle.classList.add('dragging');
+      colHandle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    colHandle.addEventListener('pointermove', e => {
+      if (!colHandle.classList.contains('dragging')) return;
+      const w = Math.max(180, Math.min(560, dragStartW + (e.clientX - dragStartX)));
+      mainEl.style.setProperty('--col1', w + 'px');
+    });
+    colHandle.addEventListener('pointerup', () => {
+      colHandle.classList.remove('dragging');
+      localStorage.setItem('diskit-col1', mainEl.style.getPropertyValue('--col1'));
+    });
+  }
+
+  // Vertical resize handle (right column split: stats/monitor vs map/details)
+  const vertHandle = document.getElementById('vertResizeHandle');
+  if (vertHandle) {
+    const mainEl = document.querySelector('main');
+    let vStartX = 0, vStartW = 0;
+    const savedCol3 = localStorage.getItem('diskit-col3');
+    if (savedCol3) mainEl.style.setProperty('--col3', savedCol3);
+    vertHandle.addEventListener('pointerdown', e => {
+      vStartX = e.clientX;
+      vStartW = document.querySelector('.stats')?.getBoundingClientRect().width ?? 400;
+      vertHandle.classList.add('dragging');
+      vertHandle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    vertHandle.addEventListener('pointermove', e => {
+      if (!vertHandle.classList.contains('dragging')) return;
+      const w = Math.max(150, vStartW + (e.clientX - vStartX));
+      mainEl.style.setProperty('--col3', w + 'px');
+    });
+    vertHandle.addEventListener('pointerup', () => {
+      vertHandle.classList.remove('dragging');
+      localStorage.setItem('diskit-col3', mainEl.style.getPropertyValue('--col3'));
+    });
+  }
+
+  // Horizontal resize handle (row split: stats/map vs monitor/details)
+  const horizHandle = document.getElementById('horizResizeHandle');
+  if (horizHandle) {
+    const mainEl = document.querySelector('main');
+    let hStartY = 0, hStartH = 0;
+    const savedRow1 = localStorage.getItem('diskit-row1');
+    if (savedRow1) mainEl.style.setProperty('--row1', savedRow1);
+    horizHandle.addEventListener('pointerdown', e => {
+      hStartY = e.clientY;
+      hStartH = document.querySelector('.stats')?.getBoundingClientRect().height ?? 300;
+      horizHandle.classList.add('dragging');
+      horizHandle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    horizHandle.addEventListener('pointermove', e => {
+      if (!horizHandle.classList.contains('dragging')) return;
+      const h = Math.max(80, hStartH + (e.clientY - hStartY));
+      mainEl.style.setProperty('--row1', h + 'px');
+    });
+    horizHandle.addEventListener('pointerup', () => {
+      horizHandle.classList.remove('dragging');
+      localStorage.setItem('diskit-row1', mainEl.style.getPropertyValue('--row1'));
+    });
+  }
+
+  // Panel collapse toggles (mobile)
+  document.querySelectorAll('.panel-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const panel = btn.closest('.panel');
+      if (!panel) return;
+      const collapsed = panel.classList.toggle('collapsed');
+      btn.setAttribute('aria-expanded', String(!collapsed));
+    });
+  });
 
   connect();
 }

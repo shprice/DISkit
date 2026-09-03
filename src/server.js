@@ -63,6 +63,10 @@ export function getNetworkAdapters() {
   return adapters;
 }
 
+/* eslint-disable no-undef */
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
+/* eslint-enable no-undef */
+
 const __dirname = typeof import.meta !== 'undefined' && import.meta && import.meta.url
   ? path.dirname(fileURLToPath(import.meta.url))
   : path.resolve();
@@ -286,7 +290,7 @@ function listLogs() {
 
 // ---- WebSocket message handling -------------------------------------------
 wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ kind: 'hello', config, mode, recording: isRecording(), recordDir, browseDir, logs: listLogs(), networkAdapters: getNetworkAdapters() }));
+  ws.send(JSON.stringify({ kind: 'hello', version: APP_VERSION, config, mode, recording: isRecording(), recordDir, browseDir, logs: listLogs(), networkAdapters: getNetworkAdapters() }));
 
   ws.on('message', async (data) => {
     let m;
@@ -454,7 +458,7 @@ server.listen(config.web.port, config.web.host, () => {
   console.log(' | |  | | | |  \\___ \\| |/ / | __|');
   console.log(' | |__| |_| |_ ____) |   <| | |_ ');
   console.log(' |_____/|_____|_____/|_|\\_\\_|_|\\__|');
-  console.log(' IEEE 1278 DIS Traffic Logger & Replay Utility');
+  console.log(` IEEE 1278 DIS Traffic Logger & Replay Utility  ${APP_VERSION}`);
   console.log('=============================================================');
   console.log(` Web UI (local)      : ${localUrl}`);
   if (networkUrls.length > 0) {
