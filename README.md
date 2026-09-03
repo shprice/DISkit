@@ -13,7 +13,8 @@ A lightweight, zero-dependency toolkit and single executable for **IEEE 1278 DIS
 - **Native OS Folder Picker**: Native Windows File Explorer and Linux folder selection dialogs for log directory browsing.
 - **PCAP Export**: Export captured log files directly to `.pcap` format for Wireshark analysis.
 
-<img width="948" height="459" alt="DISkit Dashboard" src="https://github.com/user-attachments/assets/59a9c20a-6dbf-4f8d-8baa-8694df72abee" />
+<img width="948" height="459" alt="DISkit Dashboard" src="https://github.com/user-attachments/assets/1da385c0-7d31-44b7-83b7-206459a4eab2" />
+
 
 ---
 
