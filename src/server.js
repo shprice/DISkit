@@ -96,6 +96,18 @@ const publicDir = fs.existsSync(path.join(ROOT, 'public'))
   : path.join(__dirname, '../public');
 
 const app = express();
+
+// Cross-origin isolation headers — unlocks SharedArrayBuffer in Chrome/Edge,
+// enabling a Worker-backed audio ring buffer without requiring HTTPS.
+// 'credentialless' (vs 'require-corp') avoids blocking CDN resources (Leaflet,
+// OSM tiles) that don't send Cross-Origin-Resource-Policy headers.
+// Note: Firefox does not support 'credentialless'; falls back gracefully.
+app.use((_req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+  next();
+});
+
 app.use(express.static(publicDir));
 
 app.get('/export-pcap', (req, res) => {
@@ -174,12 +186,41 @@ function broadcastAudio(key, sampleRate, pcmBuf) {
   }
 }
 
+// Per-key audio accumulation: batch PDUs for 40ms before broadcasting.
+// Smooths out bursty per-PDU delivery (typically 50 tiny frames/sec at 8kHz).
+const audioBatchMap = new Map(); // key → { sampleRate, chunks: Buffer[] }
+setInterval(() => {
+  for (const [key, batch] of audioBatchMap) {
+    if (batch.chunks.length === 0) continue;
+    const combined = Buffer.concat(batch.chunks);
+    batch.chunks = [];
+    broadcastAudio(key, batch.sampleRate, combined);
+  }
+}, 40);
+
 const sampleBuffer = [];
 function onSample(sample) {
   if (sample.header.pduType === 26 && sample.body?.encodingClass === 0) {
     const b = sample.body;
-    const pcm = decodeAudioPayload(b.encodingClass, b.encodingType, b.audioData);
-    if (pcm && pcm.length > 0) broadcastAudio(b._key, b.sampleRate || 8000, pcm);
+    const pcm = decodeAudioPayload(b.encodingClass, b.encodingType, b.audioData, b._key);
+    if (pcm && pcm.length > 0) {
+      const key = b._key;
+      const sr    = b.sampleRate || 8000;
+      const batch = audioBatchMap.get(key);
+      if (!batch) {
+        audioBatchMap.set(key, { sampleRate: sr, chunks: [pcm] });
+      } else {
+        if (batch.sampleRate !== sr) {
+          // Sample rate changed mid-stream; flush existing batch at old rate first
+          if (batch.chunks.length > 0) {
+            broadcastAudio(key, batch.sampleRate, Buffer.concat(batch.chunks));
+          }
+          batch.sampleRate = sr;
+          batch.chunks = [];
+        }
+        batch.chunks.push(pcm);
+      }
+    }
   }
   sampleBuffer.push({
     type: sample.header.pduType,

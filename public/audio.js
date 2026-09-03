@@ -124,18 +124,31 @@ class AudioManager {
     this._channels   = new Map();
     this._pending    = [];
     this.onUpdate    = null;
+    // Pre-register gesture listeners so AudioContext can start on first interaction
+    // even if no audio frame has arrived yet.
+    const earlyInit = () => {
+      document.removeEventListener('click',      earlyInit, true);
+      document.removeEventListener('keydown',    earlyInit, true);
+      document.removeEventListener('pointerdown',earlyInit, true);
+      this._init().catch(() => {});
+    };
+    document.addEventListener('click',      earlyInit, true);
+    document.addEventListener('keydown',    earlyInit, true);
+    document.addEventListener('pointerdown',earlyInit, true);
   }
 
   async _init() {
     if (this._ctx) return;
     this._ctx = new AudioContext();
-    // Retry resume on every user gesture (Chrome blocks without one)
+    // Retry resume on every subsequent user gesture in case context is suspended again
     const tryResume = () => {
-      if (this._ctx?.state === 'suspended') this._ctx.resume().catch(() => {});
+      if (this._ctx?.state !== 'running') this._ctx?.resume().catch(() => {});
     };
-    document.addEventListener('click',   tryResume);
-    document.addEventListener('keydown', tryResume);
-    try { await this._ctx.resume(); } catch {}
+    document.addEventListener('click',      tryResume, true);
+    document.addEventListener('keydown',    tryResume, true);
+    document.addEventListener('pointerdown',tryResume, true);
+    // Don't await — Chrome blocks resume() without a gesture; the listeners above handle it.
+    this._ctx.resume().catch(() => {});
 
     // AudioWorklet requires a secure context (HTTPS or localhost)
     if (window.isSecureContext && this._ctx.audioWorklet) {
