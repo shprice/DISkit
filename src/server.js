@@ -67,7 +67,7 @@ const __dirname = typeof import.meta !== 'undefined' && import.meta && import.me
   ? path.dirname(fileURLToPath(import.meta.url))
   : path.resolve();
 const execDir = path.dirname(process.execPath);
-const isSEA = process.execPath.endsWith('dislogger') || process.execPath.endsWith('dislogger.exe');
+const isSEA = /dis(logger|kit)(\.exe)?$/.test(process.execPath);
 const ROOT = isSEA ? execDir : path.resolve(__dirname, '..');
 
 const configPath = fs.existsSync(path.join(ROOT, 'config.json'))
