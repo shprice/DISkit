@@ -1,4 +1,4 @@
-// Node.js SEA (Single Executable Application) Build Script for DISLogger.
+// Node.js SEA (Single Executable Application) Build Script for DISkit.
 // Bundles the application code and dependencies, generates the SEA blob,
 // and fuses it into a standalone binary executable for Windows and Linux.
 
@@ -11,15 +11,15 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
-const STAGING = path.join(DIST, 'dislogger-dist');
+const STAGING = path.join(DIST, 'diskit-dist');
 
 const isWin = os.platform() === 'win32';
-const exeName = isWin ? 'dislogger.exe' : 'dislogger';
+const exeName = isWin ? 'diskit.exe' : 'diskit';
 const targetExe = path.join(DIST, exeName);
 const bundlePath = path.join(DIST, 'bundle.cjs');
 const blobPath = path.join(DIST, 'sea-prep.blob');
 
-console.log('=== DISLogger SEA Build Pipeline ===\n');
+console.log('=== DISkit SEA Build Pipeline ===\n');
 
 // 1. Prepare output directories
 fs.rmSync(DIST, { recursive: true, force: true });
@@ -109,7 +109,7 @@ if (fs.existsSync(sampleLogsDir)) {
 }
 
 console.log('\n==================================================');
-console.log(`SUCCESS! Single Executable Application built successfully:`);
+console.log('SUCCESS! Single Executable Application built successfully:');
 console.log(`Executable Binary : ${distBin}`);
 console.log(`Distribution Dir  : ${STAGING}`);
 console.log('==================================================\n');

@@ -4,7 +4,7 @@
 
 A lightweight, zero-dependency toolkit and single executable for **IEEE 1278 DIS** (Distributed Interactive Simulation) network traffic logging, replay, and live geospatial visualization.
 
-- **Single Executable Application (SEA)**: Compiles into standalone binaries (`dislogger.exe` on Windows, `dislogger` on Linux) with zero runtime dependencies.
+- **Single Executable Application (SEA)**: Compiles into standalone binaries (`diskit.exe` on Windows, `diskit` on Linux) with zero runtime dependencies.
 - **Capture**: Unicast or multicast UDP DIS traffic on a configurable port with real-time PDU type filtering.
 - **Record & Bookmarks**: Save to compact `.dislog` ZIP containers. Add interactive bookmarks during recording or replay, persisted directly into log metadata.
 - **Replay**: Replay logs back onto the network at **0.5x–1000x** speed, with continuous looping, version translation (DIS v4, v5, v6, v7), and broadcast address auto-calculation.
@@ -21,12 +21,12 @@ A lightweight, zero-dependency toolkit and single executable for **IEEE 1278 DIS
 
 ### Option 1: Standalone Single Executable (Recommended)
 
-No Node.js installation required. Download or build the standalone executable binary:
+No Node.js installation required. **[Download the latest release](https://github.com/shprice/DISkit/releases/latest)** and extract the zip for your platform, or build from source:
 
 #### Windows
 ```powershell
 # Run standalone executable (automatically opens browser to http://127.0.0.1:8080)
-.\dislogger.exe
+.\diskit.exe
 
 # Optional: Install to system with Desktop shortcut
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
 #### Linux
 ```bash
 # Run standalone executable
-./dislogger
+./diskit
 
 # Optional: Install to system with Systemd background service
 sudo bash scripts/install-linux.sh
@@ -64,7 +64,7 @@ To package DISkit into a standalone Single Executable Application (SEA):
 ```bash
 npm run build:sea
 ```
-*Outputs distribution binaries and static assets to `dist/dislogger-dist/`.*
+*Outputs distribution binaries and static assets to `dist/diskit-dist/`.*
 
 ---
 
@@ -127,7 +127,7 @@ DISkit decodes DIS protocol families (IEEE 1278.1 / 1278.1a):
 ## Project Layout
 
 ```
-dislogger/
+diskit/
 ├── src/
 │   ├── server.js        HTTP, WebSocket orchestrator, OS folder picker & splash banner
 │   ├── capture.js       UDP DIS socket listener, filtering, and ZIP recorder
@@ -143,7 +143,7 @@ dislogger/
 │   ├── install-windows.ps1 Windows PowerShell installer script
 │   └── install-linux.sh Linux Systemd service installer script
 └── dist/
-    └── dislogger-dist/  Compiled standalone executable distribution package
+    └── diskit-dist/     Compiled standalone executable distribution package
 ```
 
 ---

@@ -1,5 +1,5 @@
 {
-  "name": "dislogger",
+  "name": "diskit",
   "version": "1.0.0",
   "description": "IEEE 1278 DIS traffic logger and replay utility with live web UI",
   "type": "module",

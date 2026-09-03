@@ -1,13 +1,10 @@
 node_modules/
 /logs/
+/dist/
 *.pcap
 .claude/
 .remember/
 
-# Un-ignore sample logs directory and distributed dist logs
+# Un-ignore sample logs
 !sample_logs/
 !sample_logs/**
-!dist/dislogger-dist/logs/
-!dist/dislogger-dist/logs/**
-!**/Example Log.dislog
-!**/Example Log.dislog.meta.json
