@@ -1,6 +1,6 @@
 {
   "name": "diskit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "IEEE 1278 DIS traffic logger and replay utility with live web UI",
   "type": "module",
   "main": "src/server.js",
