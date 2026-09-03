@@ -223,6 +223,7 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .maphead h3 { margin: 0; }
 #mapContainer { position: relative; width: 100%; flex: 1; min-height: 200px; margin-top: 8px; }
 #mapCanvas, #leafletMap { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 6px; }
+#leafletMap { isolation: isolate; }
 #mapCanvas { background: #0a1f1a; }
 .hidden { display: none !important; }
 
@@ -413,6 +414,32 @@ tr.stale-red { background: rgba(248, 81, 73, 0.07); }
 .map-source-pill.on  { background: #16331c; color: var(--green); }
 .map-source-pill.off { background: #2a2f38; color: var(--muted); }
 .map-source-pill.err { background: #3a2226; color: var(--red); }
+/* Map entity callout tooltip */
+.map-callout-svg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 19; overflow: visible;
+}
+#mapCalloutSvgLine { stroke: rgba(255,255,255,.7); stroke-width: 2; stroke-dasharray: 6,4; fill: none; }
+#mapCalloutSvgDot  { fill: rgba(255,255,255,.8); stroke: none; }
+.map-callout {
+  position: absolute; z-index: 20; pointer-events: none;
+  background: rgba(18,22,30,.72); border: 1px solid rgba(255,255,255,.18);
+  border-radius: 8px; padding: 8px 10px; min-width: 200px; max-width: 252px;
+  box-shadow: 0 4px 22px rgba(0,0,0,.6);
+  font-size: 11px; line-height: 1.4;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.mco-head {
+  display: flex; align-items: center; gap: 6px;
+  font-weight: 600; font-size: 12px; color: #e8eaf0;
+  margin-bottom: 6px; padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,.15);
+}
+.mco-force { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.mco-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mco-list { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; }
+.mco-list dt { color: rgba(255,255,255,.5); font-weight: normal; white-space: nowrap; }
+.mco-list dd { margin: 0; color: #e8eaf0; word-break: break-word; min-width: 0; }
+.mco-list dd .mco-sub { display: block; font-size: 9.5px; color: rgba(255,255,255,.45); }
 /* Maphead actions group */
 .maphead-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 /* PDU Monitor header */

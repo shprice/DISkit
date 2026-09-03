@@ -61,6 +61,7 @@ let replayBookmarks = [];     // bookmarks of the loaded/selected replay log
 let replayDurationMs = 0;     // duration of the selected replay log
 let selectedKey = null;
 let selectedType = null;      // 'entity' | 'emitter'
+let isLocalHost = false;
 let lastStats = null;
 let lastDetailsSerial = null; // skip detail re-render when data is unchanged
 const sidcSvgCache = new Map(); // SIDC string → SVG string (keyed by full 20-char SIDC)
@@ -178,6 +179,7 @@ function handle(m) {
       if (m.config?.siteNames) { siteNames = m.config.siteNames; }
       if (m.config?.appNames)  { appNames  = m.config.appNames;  }
       if (typeof renderSiteAppNamesTable === 'function') renderSiteAppNamesTable();
+      if (typeof m.isLocal === 'boolean') { isLocalHost = m.isLocal; applyHostVisibility(); }
       logs = m.logs || []; renderLogs(); setMode(m.mode); setRecording(m.recording, m.recordStartMs); break;
     case 'config':
       if (m.entityTimeoutSecs) {
@@ -501,8 +503,10 @@ function renderStats(s) {
     const tx   = selectedType === 'transmitter' ? s.transmitters?.find(x => x._key === selectedKey): null;
     const sig  = selectedType === 'signal'      ? s.signals?.find(x => x._key === selectedKey)     : null;
     const fresh = ent || emit || tx || sig;
-    if (fresh) renderDetails(fresh);
-    else if (!selectedType?.startsWith('fire') && !selectedType?.startsWith('det')) {
+    if (fresh) {
+      renderDetails(fresh);
+      if (selectedType === 'entity') window.MapView.showCallout(buildMapCallout(ent));
+    } else if (!selectedType?.startsWith('fire') && !selectedType?.startsWith('det')) {
       selectedKey = null; selectedType = null; renderDetails(null);
     }
   }
@@ -511,6 +515,44 @@ function renderStats(s) {
   window.MapView.update(s.entities);
 }
 function fnum(v, d) { return (v === undefined || v === null || !isFinite(v)) ? '' : Number(v).toFixed(d); }
+
+function buildMapCallout(e) {
+  const mpsToKts = v => isFinite(v) ? (v * 1.94384).toFixed(0) : '—';
+  const mToFt   = m => isFinite(m) ? Math.round(m * 3.28084) : null;
+  function ddToDdm(deg, isLat) {
+    const abs = Math.abs(deg), d = Math.floor(abs);
+    const dir = isLat ? (deg >= 0 ? 'N' : 'S') : (deg >= 0 ? 'E' : 'W');
+    return `${d}° ${((abs - d) * 60).toFixed(3)}' ${dir}`;
+  }
+  function ddToDms(deg, isLat) {
+    const abs = Math.abs(deg), d = Math.floor(abs);
+    const mAll = (abs - d) * 60, m = Math.floor(mAll);
+    const dir = isLat ? (deg >= 0 ? 'N' : 'S') : (deg >= 0 ? 'E' : 'W');
+    return `${d}° ${m}' ${((mAll - m) * 60).toFixed(1)}" ${dir}`;
+  }
+  function latLonCell(deg, isLat) {
+    if (!isFinite(deg)) return '—';
+    return `${fnum(deg, 5)}°<span class="mco-sub">${ddToDdm(deg, isLat)}</span><span class="mco-sub">${ddToDms(deg, isLat)}</span>`;
+  }
+  const [kSite, kApp, kEnt] = (e.key || '').split(':');
+  const typeLabel = lookupEntityType(e.type);
+  const damageLabel = e.appearance != null
+    ? (['None', 'Slight', 'Moderate', 'Destroyed'][(e.appearance >>> 5) & 3] || null)
+    : null;
+  const ft = mToFt(e.alt);
+  const rows = [
+    ['ID', `${kSite ?? '—'} · ${kApp ?? '—'} · ${kEnt ?? '—'}`],
+    ['Marking', escapeHtml(e.marking || '—')],
+    ['Lat', latLonCell(e.lat, true)],
+    ['Lon', latLonCell(e.lon, false)],
+    ['Alt', isFinite(e.alt) ? `${fnum(e.alt, 0)} m / ${ft} ft` : '—'],
+    ['Hdg / Spd', `${isFinite(e.heading) ? fnum(e.heading, 0) + '°' : '—'} / ${mpsToKts(e.speed)} kts`],
+    typeLabel ? ['Type', escapeHtml(typeLabel)] : null,
+    damageLabel && damageLabel !== 'None' ? ['Damage', escapeHtml(damageLabel)] : null,
+  ].filter(Boolean);
+  return `<div class="mco-head"><span class="mco-force f${e.forceId ?? 0}"></span><span class="mco-title">${escapeHtml(e.marking || e.key)}</span></div>` +
+    `<dl class="mco-list">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+}
 
 function selectItem(key, type, data) {
   selectedKey = key;
@@ -1068,19 +1110,27 @@ function doPlay() {
   });
 }
 
+function applyHostVisibility() {
+  document.querySelectorAll('.host-only').forEach(el => el.classList.toggle('hidden', !isLocalHost));
+  document.querySelectorAll('.client-only').forEach(el => el.classList.toggle('hidden', isLocalHost));
+}
+
 // ---- wiring ----------------------------------------------------------------
 function init() {
+  applyHostVisibility(); // apply before WebSocket connects (default: non-host)
   window.MapView.init({
     onEntityClick: (key) => {
       if (!key) {
         selectedKey = null; selectedType = null;
         applyTableSelection();
         window.MapView.setSelected(null);
+        window.MapView.showCallout(null);
         return;
       }
       const entity = lastStats?.entities?.find(x => x.key === key);
       if (entity) {
         selectItem(key, 'entity', entity);
+        window.MapView.showCallout(buildMapCallout(entity));
         document.querySelectorAll('.ptab').forEach(t => t.classList.toggle('active', t.dataset.ptab === 'entities'));
         document.querySelectorAll('.ptabbody').forEach(b => b.classList.toggle('hidden', b.id !== 'ptab-entities'));
       }
@@ -1173,21 +1223,35 @@ function init() {
   bindMulti('capMulti', 'capGroup');
   bindMulti('repMulti', 'repGroup');
 
-  // Log directory controls.
-  const doSetRecDir = () => {
-    const v = ($('recDir').value || '').trim();
-    if (v) send({ cmd: 'setRecordDir', dir: v });
-    else send({ cmd: 'browseRecordFolder' });
+  // Log directory controls — browse button always opens the native OS folder dialog.
+  $('btnBrowseRecDir')?.addEventListener('click', () => { toast('Opening folder dialog on host…'); send({ cmd: 'browseRecordFolder' }); });
+
+  // "..." always opens the native OS folder dialog on the host.
+  $('btnOpenDir').onclick = () => { toast('Opening folder dialog on host…'); send({ cmd: 'browseFolder' }); };
+  // Typing + Enter in the browse field sets the path without a dialog.
+  $('browseDir').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      const v = ($('browseDir').value || '').trim();
+      if (v) send({ cmd: 'setBrowseDir', dir: v });
+    }
   };
-  const doOpenDir = () => {
-    const v = ($('browseDir').value || '').trim();
-    if (v) send({ cmd: 'setBrowseDir', dir: v });
-    else send({ cmd: 'browseFolder' });
-  };
-  $('btnSetRecDir').onclick = doSetRecDir;
-  $('recDir').onkeydown = (e) => { if (e.key === 'Enter') doSetRecDir(); };
-  $('btnOpenDir').onclick = doOpenDir;
-  $('browseDir').onkeydown = (e) => { if (e.key === 'Enter') doOpenDir(); };
+
+  $('btnUploadLog')?.addEventListener('click', () => $('uploadLogInput')?.click());
+  $('uploadLogInput')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const res = await fetch(`/upload-log?name=${encodeURIComponent(file.name)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
+      });
+      const json = await res.json();
+      if (json.ok) { toast(`Uploaded ${json.name}`); send({ cmd: 'listLogs' }); }
+      else toast('⚠ Upload failed');
+    } catch { toast('⚠ Upload failed'); }
+  });
 
   function renderSiteAppNamesTable() {
     const tbody = $('siteAppNamesTable').querySelector('tbody');
@@ -1304,7 +1368,7 @@ function init() {
     if (!tr) return;
     const key = tr.dataset.key;
     const entity = lastStats?.entities?.find(x => x.key === key);
-    if (entity) selectItem(key, 'entity', entity);
+    if (entity) { selectItem(key, 'entity', entity); window.MapView.showCallout(buildMapCallout(entity)); }
   });
   $('emitterTable').addEventListener('click', (e) => {
     const tr = e.target.closest('tr[data-key]');

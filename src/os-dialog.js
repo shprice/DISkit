@@ -30,14 +30,22 @@ export function pickFolder(initialDir) {
     const platform = process.platform;
 
     if (platform === 'win32') {
+      // A hidden TopMost owner form forces the dialog in front of all windows.
       const psScript = [
         'Add-Type -AssemblyName System.Windows.Forms',
         '$f = New-Object System.Windows.Forms.FolderBrowserDialog',
         '$f.Description = "Select DISLogger Log Folder"',
-        initialDir ? `$f.SelectedPath = "${initialDir.replace(/\\/g, '\\\\')}"` : '',
-        'if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {',
+        '$f.ShowNewFolderButton = $true',
+        initialDir ? `$f.SelectedPath = '${initialDir}'` : '',
+        '$owner = New-Object System.Windows.Forms.Form',
+        '$owner.TopMost = $true',
+        '$owner.Width = 0; $owner.Height = 0',
+        '$owner.StartPosition = "CenterScreen"',
+        '$owner.Show(); $owner.BringToFront()',
+        'if ($f.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {',
         '  [Console]::WriteLine($f.SelectedPath)',
-        '}'
+        '}',
+        '$owner.Dispose()',
       ].filter(Boolean).join('\r\n');
 
       const tempPs1 = path.join(os.tmpdir(), `dislogger_pick_${Date.now()}_${Math.random().toString(36).slice(2)}.ps1`);
@@ -58,15 +66,24 @@ export function pickFolder(initialDir) {
     }
 
     if (platform === 'darwin') {
-      exec(`osascript -e 'POSIX path of (choose folder with prompt "Select DISLogger Log Folder")'`, (err, stdout) => {
+      const loc = initialDir ? ` default location POSIX file "${initialDir.replace(/"/g, '\\"')}"` : '';
+      exec(`osascript -e 'POSIX path of (choose folder with prompt "Select DISLogger Log Folder"${loc})'`, (err, stdout) => {
         if (err || !stdout) resolve(null);
-        else resolve(stdout.trim() || null);
+        else resolve(stdout.trim().replace(/\/$/, '') || null);
       });
       return;
     }
 
-    // Linux fallback chain
-    const cmd = `zenity --file-selection --directory --title="Select DISLogger Log Folder" 2>/dev/null || kdialog --getexistingdirectory 2>/dev/null || python3 -c "import tkinter as t, filedialog as f; root=t.Tk(); root.withdraw(); print(f.askdirectory(title='Select DISLogger Log Folder'))" 2>/dev/null`;
+    // Linux fallback chain — zenity, kdialog, then tkinter
+    const safeDir = (initialDir || '').replace(/'/g, "'\\''");
+    const zenityStart  = initialDir ? `--filename='${safeDir}/'` : '';
+    const kdialogStart = initialDir ? `'${safeDir}'` : '';
+    const tkStart      = initialDir ? `initialdir='${safeDir}',` : '';
+    const cmd = [
+      `zenity --file-selection --directory --title="Select DISLogger Log Folder" ${zenityStart} 2>/dev/null`,
+      `kdialog --getexistingdirectory ${kdialogStart} 2>/dev/null`,
+      `python3 -c "import tkinter as t; from tkinter import filedialog as f; root=t.Tk(); root.withdraw(); print(f.askdirectory(${tkStart}title='Select DISLogger Log Folder'))" 2>/dev/null`,
+    ].join(' || ');
     exec(cmd, (err, stdout) => {
       if (err || !stdout) resolve(null);
       else resolve(stdout.trim() || null);

@@ -78,12 +78,12 @@
       <div class="tabbody hidden" id="tab-capture">
         <fieldset>
           <legend>Recording</legend>
-          <div class="row">
-            <label class="grow">Save location <input id="recDir" type="text" placeholder="logs folder path" /></label>
-            <button id="btnSetRecDir" title="Set as default save location">Set</button>
+          <div class="row host-only" id="rowSaveLocation">
+            <label class="grow">Save location <input id="recDir" type="text" placeholder="logs folder path" readonly /></label>
+            <button id="btnBrowseRecDir" title="Browse for a save folder">...</button>
           </div>
           <div class="row">
-            <label class="grow">File <input id="recName" type="text" placeholder="(auto timestamp).dislog" /></label>
+            <label class="grow" title="Recording is saved on the host machine. To change the save location, open the UI on the host machine.">File <input id="recName" type="text" placeholder="(auto timestamp).dislog" /></label>
           </div>
           <div class="row">
             <button id="btnRecord" class="rec">● Record</button>
@@ -102,15 +102,19 @@
       </div>
 
       <div class="tabbody hidden" id="tab-replay">
-        <div class="row">
-          <label class="grow">Log folder <input id="browseDir" type="text" placeholder="folder path" /></label>
-          <button id="btnOpenDir" title="Open this folder and list its logs">Open</button>
+        <div class="row host-only" id="rowHostLogFolder">
+          <label class="grow" title="Log folder on the host machine (server). Defaults to the installation directory's /logs folder.">Host Log Folder <input id="browseDir" type="text" placeholder="folder path" /></label>
+          <button id="btnOpenDir" title="Browse for a folder on the host machine">...</button>
         </div>
         <div class="row">
           <label class="grow">Log File
             <select id="logSelect"></select>
           </label>
-          <button id="btnRefreshLogs" title="Refresh list">↻</button>
+          <button id="btnRefreshLogs" title="Refresh the list of log files available in the host machine's log directory">↻</button>
+        </div>
+        <div class="row client-only" id="rowUploadLog">
+          <button id="btnUploadLog" title="Upload a .dislog file from this machine to the host server's log directory">Upload...</button>
+          <input id="uploadLogInput" type="file" accept=".dislog" style="display:none">
         </div>
         <div id="logInfo" class="loginfo"></div>
         <div class="row">
@@ -268,6 +272,11 @@
       <div id="mapContainer">
         <canvas id="mapCanvas"></canvas>
         <div id="leafletMap" class="hidden"></div>
+        <svg id="mapCalloutSvg" class="map-callout-svg hidden" aria-hidden="true">
+          <line id="mapCalloutSvgLine"/>
+          <circle id="mapCalloutSvgDot" r="3.5"/>
+        </svg>
+        <div id="mapCallout" class="map-callout hidden"></div>
       </div>
       </div><!-- /panel-body -->
     </section>

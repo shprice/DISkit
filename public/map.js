@@ -33,6 +33,7 @@ const MapView = (() => {
   let onEntityClick = null;
   let animFrame = null;
   let pulseRing = null;       // Leaflet circleMarker for selection pulse animation
+  let calloutEl = null, calloutSvgEl = null, calloutSvgLine = null, calloutSvgDot = null;
 
   let showDirections = false;  // draw heading arrows
   let showDR = false;          // overlay dead-reckoned positions
@@ -689,6 +690,7 @@ const MapView = (() => {
         ? 'pinch to zoom · drag to pan · double-tap to reset'
         : 'scroll to zoom · drag to pan · dbl-click to reset', 4, h - 18);
     }
+    updateCalloutPosition();
   }
 
   // Pulse ring is a CSS-animated divIcon — no JS RAF needed for the animation itself.
@@ -736,6 +738,63 @@ const MapView = (() => {
     }).addTo(leaflet);
   }
 
+  function updateCalloutPosition() {
+    if (!calloutEl || calloutEl.classList.contains('hidden') || !selectedKey) return;
+    const ent = lastEntities.find(x => x.key === selectedKey);
+    if (!ent || !isFinite(ent.lat) || !isFinite(ent.lon)) return;
+    let sx, sy, containerW, containerH;
+    if (useTiles && leaflet) {
+      const pt = leaflet.latLngToContainerPoint([ent.lat, ent.lon]);
+      sx = pt.x; sy = pt.y;
+      containerW = leafletEl.offsetWidth; containerH = leafletEl.offsetHeight;
+    } else if (canvas) {
+      const b = bounds(lastEntities) || WORLD;
+      const w = canvas.width, h = canvas.height;
+      const { mapW, mapH, ox, oy } = projGeo(b, w, h);
+      sx = ((ent.lon - b.minLon) / (b.maxLon - b.minLon) * mapW + ox) * zoom + panX;
+      sy = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * mapH + oy) * zoom + panY;
+      containerW = w; containerH = h;
+    } else return;
+    const OFFSET = 55;
+    const cw = calloutEl.offsetWidth || 220;
+    const ch = calloutEl.offsetHeight || 160;
+    // Prefer right of entity, fall back to left
+    let left = (sx + OFFSET + cw <= containerW - 8) ? sx + OFFSET : sx - OFFSET - cw;
+    // Center vertically on entity, clamp to bounds
+    let top = Math.max(8, Math.min(containerH - ch - 8, sy - ch / 2));
+    left = Math.max(4, left);
+    calloutEl.style.left = left + 'px';
+    calloutEl.style.top = top + 'px';
+    // SVG line from entity to nearest callout edge
+    if (!calloutSvgEl) {
+      calloutSvgEl  = document.getElementById('mapCalloutSvg');
+      calloutSvgLine = document.getElementById('mapCalloutSvgLine');
+      calloutSvgDot  = document.getElementById('mapCalloutSvgDot');
+    }
+    if (calloutSvgLine && calloutSvgDot) {
+      const lineX2 = (left > sx) ? left : left + cw;
+      const lineY2 = Math.max(top, Math.min(top + ch, sy));
+      calloutSvgLine.setAttribute('x1', sx); calloutSvgLine.setAttribute('y1', sy);
+      calloutSvgLine.setAttribute('x2', lineX2); calloutSvgLine.setAttribute('y2', lineY2);
+      calloutSvgDot.setAttribute('cx', sx); calloutSvgDot.setAttribute('cy', sy);
+    }
+  }
+
+  function showCallout(html) {
+    if (!calloutEl) calloutEl = document.getElementById('mapCallout');
+    if (!calloutSvgEl) calloutSvgEl = document.getElementById('mapCalloutSvg');
+    if (!calloutEl) return;
+    if (!html) {
+      calloutEl.classList.add('hidden');
+      if (calloutSvgEl) calloutSvgEl.classList.add('hidden');
+      return;
+    }
+    calloutEl.innerHTML = html;
+    calloutEl.classList.remove('hidden');
+    if (calloutSvgEl) calloutSvgEl.classList.remove('hidden');
+    requestAnimationFrame(() => updateCalloutPosition());
+  }
+
   function setSelected(key) {
     selectedKey = key;
     const ent = key ? lastEntities.find(x => x.key === key) : null;
@@ -751,6 +810,10 @@ const MapView = (() => {
         panX = w / 2 - relX;
         panY = h / 2 - relY;
       }
+    }
+    if (!key) {
+      if (calloutEl) calloutEl.classList.add('hidden');
+      if (calloutSvgEl) calloutSvgEl.classList.add('hidden');
     }
     if (useTiles) {
       if (pulseRing && leaflet) { leaflet.removeLayer(pulseRing); pulseRing = null; }
@@ -1029,6 +1092,7 @@ const MapView = (() => {
           }).addTo(leaflet);
           leaflet.on('click', () => { if (onEntityClick) onEntityClick(null); });
           leaflet.on('zoomend', () => updateLeaflet());
+          leaflet.on('move', () => updateCalloutPosition());
         }
         setTimeout(() => {
           leaflet.invalidateSize();
@@ -1105,7 +1169,7 @@ const MapView = (() => {
     if (needsLoop()) ensureLoop(); else draw();
   }
 
-  return { init, update, setTiles, resetView, setSelected, setSymbolSize, setShowDirections, setShowDR, setFollow, setHistory, entityToSidc, entityToSidcLabel, resize: triggerResize };
+  return { init, update, setTiles, resetView, setSelected, showCallout, setSymbolSize, setShowDirections, setShowDR, setFollow, setHistory, entityToSidc, entityToSidcLabel, resize: triggerResize };
 })();
 
 window.MapView = MapView;

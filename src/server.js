@@ -120,6 +120,24 @@ app.get('/export-pcap', (req, res) => {
     res.status(500).send(String(e.message || e));
   }
 });
+app.post('/upload-log', (req, res) => {
+  const raw = path.basename(String(req.query.name || `upload_${Date.now()}.dislog`));
+  const safeName = raw.endsWith('.dislog') ? raw : raw + '.dislog';
+  const dest = path.join(browseDir, safeName);
+  const chunks = [];
+  req.on('data', chunk => chunks.push(chunk));
+  req.on('end', () => {
+    try {
+      fs.writeFileSync(dest, Buffer.concat(chunks));
+      broadcast({ kind: 'logs', logs: listLogs(), browseDir });
+      res.json({ ok: true, name: safeName });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: 'Upload failed' });
+    }
+  });
+  req.on('error', () => res.status(500).json({ ok: false, error: 'Upload failed' }));
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -289,8 +307,9 @@ function listLogs() {
 }
 
 // ---- WebSocket message handling -------------------------------------------
-wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ kind: 'hello', version: APP_VERSION, config, mode, recording: isRecording(), recordDir, browseDir, logs: listLogs(), networkAdapters: getNetworkAdapters() }));
+wss.on('connection', (ws, req) => {
+  const isLocal = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+  ws.send(JSON.stringify({ kind: 'hello', version: APP_VERSION, config, mode, recording: isRecording(), recordDir, browseDir, logs: listLogs(), networkAdapters: getNetworkAdapters(), isLocal }));
 
   ws.on('message', async (data) => {
     let m;
