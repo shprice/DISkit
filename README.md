@@ -10,7 +10,6 @@ A lightweight, zero-dependency toolkit and single executable for **IEEE 1278 DIS
 - **Replay**: Replay logs back onto the network at **0.5x–1000x** speed, with continuous looping, version translation (DIS v4, v5, v6, v7), and broadcast address auto-calculation.
 - **Live Visualization**: Real-time stats dashboard displaying PDU rates, entity tracking tables, emitter details (frequency, PRF, ERP), transmitters, signals, and fire/detonation logs.
 - **Map View**: MIL-STD-2525 symbol rendering on an offline canvas with bundled world coastlines (no internet required), or switchable online OpenStreetMap Leaflet view.
-- **Native OS Folder Picker**: Native Windows File Explorer and Linux folder selection dialogs for log directory browsing.
 - **PCAP Export**: Export captured log files directly to `.pcap` format for Wireshark analysis.
 
 <img width="948" height="459" alt="DISkit Dashboard" src="https://github.com/user-attachments/assets/1da385c0-7d31-44b7-83b7-206459a4eab2" />
