@@ -67,11 +67,12 @@ let lastDetailsSerial = null; // skip detail re-render when data is unchanged
 const sidcSvgCache = new Map(); // SIDC string → SVG string (keyed by full 20-char SIDC)
 let entityTimeoutMs = 10000;  // from config.entityTimeoutSecs; amber at ½, red at full
 let siteNames = {};  // { "100": "Site A" }
+let appNames = {};   // { "1": "Blue Force" }
+let renderSiteAppNamesTable = null; // assigned in init(); called from handle() on hello
 const dataRateHistory = [];
 const pduRateHistory = [];
 const activeAudioKeys = new Map(); // key → timeout id
 const RATE_HISTORY_MAX = 240;
-let appNames = {};   // { "1": "Blue Force" }
 
 function $(id) { return document.getElementById(id); }
 
@@ -445,7 +446,7 @@ function renderStats(s) {
     <tr data-key="${escapeHtml(r._key || r.entity + '|' + (r.emitter || ''))}">
       <td>${escapeHtml(r.entity)}</td><td>${escapeHtml(String(r.emitterName ?? r.emitter ?? ''))}</td>
       <td>${escapeHtml(r.beamFunction || r['function'] || '')}</td>
-      <td>${escapeHtml(r.band || '')}</td><td>${r.freqMHz}</td><td>${r.prf}</td><td>${r.erp}</td>
+      <td>${escapeHtml(r.band || '')}</td><td>${ffreq(r.freqMHz)}</td><td>${frate(r.prf)}</td><td>${r.erp != null ? r.erp + ' dBm' : '—'}</td>
     </tr>`).join('');
 
   const txb = $('txTableBody');
@@ -453,10 +454,21 @@ function renderStats(s) {
     txb.innerHTML = (s.transmitters || []).map(t => `
       <tr data-key="${escapeHtml(t._key)}"${t.txState === 2 ? ' class="tx-active"' : ''}>
         <td>${escapeHtml(t.entityKey)}</td><td>${t.radioId}</td>
-        <td>${escapeHtml(t.txStateName)}</td><td>${t.freqMHz}</td>
-        <td>${escapeHtml(t.band || '—')}</td><td>${t.power}</td>
+        <td>${escapeHtml(t.txStateName)}</td><td>${ffreq(t.freqMHz)}</td>
+        <td>${escapeHtml(t.band || '—')}</td><td>${t.power != null ? t.power + ' dBm' : '—'}</td>
       </tr>`).join('');
   }
+  const rxb = $('rxTableBody');
+  if (rxb) {
+    rxb.innerHTML = (s.receivers || []).map(r => `
+      <tr data-key="${escapeHtml(r._key)}"${r.receiverState === 2 ? ' class="rx-active"' : ''}>
+        <td>${escapeHtml(r.entityIdKey)}</td><td>${r.radioId}</td>
+        <td>${escapeHtml(r.receiverStateName)}</td>
+        <td>${r.receivedPower != null ? r.receivedPower + ' dBm' : '—'}</td>
+        <td>${escapeHtml(r.transmitterEntityKey || '—')}</td><td>${r.transmitterRadioId ?? '—'}</td>
+      </tr>`).join('');
+  }
+
   const sigb = $('sigTableBody');
   if (sigb) {
     sigb.innerHTML = (s.signals || []).map(sg => {
@@ -469,7 +481,35 @@ function renderStats(s) {
         <td>${escapeHtml(sg.entityIdKey)}</td><td>${sg.radioId}</td>
         <td>${escapeHtml(sg.encodingClassName || '—')}</td>
         <td>${escapeHtml(sg.tdlTypeName || '—')}</td>
-        <td>${sg.sampleRate || 0}</td><td>${sg.dataLengthBits || 0}</td>${gearCell}
+        <td>${frate(sg.sampleRate)}</td><td>${sg.dataLengthBits || 0}</td>${gearCell}
+      </tr>`;
+    }).join('');
+  }
+
+  const icctrlb = $('icCtrlTableBody');
+  if (icctrlb) {
+    icctrlb.innerHTML = (s.intercomControls || []).map(ic => `
+      <tr data-key="${escapeHtml(ic._key)}"${ic.transmitLineState === 1 ? ' class="ic-ctrl-active"' : ''}>
+        <td>${escapeHtml(ic.sourceEntityKey)}</td><td>${ic.sourceDeviceId}</td>
+        <td>${ic.sourceLineId}</td>
+        <td>${ic.transmitLineState === 1 ? 'Transmitting' : 'Idle'}</td>
+        <td>${escapeHtml(ic.controlTypeName)}</td><td>${escapeHtml(ic.commandName)}</td>
+        <td>${ic.transmitPriority}</td>
+      </tr>`).join('');
+  }
+  const icsigb = $('icSigTableBody');
+  if (icsigb) {
+    icsigb.innerHTML = (s.intercomSignals || []).map(ic => {
+      const isAudio = ic.encodingClass === 0;
+      const active  = activeAudioKeys.has(ic._key);
+      const gearCell = isAudio
+        ? `<td><button class="audio-gear-btn mini" data-key="${escapeHtml(ic._key)}" title="Audio settings">⚙</button></td>`
+        : '<td></td>';
+      return `<tr data-key="${escapeHtml(ic._key)}"${active ? ' class="ic-sig-active"' : ''}>
+        <td>${escapeHtml(ic.entityIdKey)}</td><td>${ic.deviceId}</td>
+        <td>${escapeHtml(ic.encodingClassName || '—')}</td>
+        <td>${escapeHtml(ic.tdlTypeName || '—')}</td>
+        <td>${frate(ic.sampleRate)}</td><td>${ic.dataLengthBits || 0}</td>${gearCell}
       </tr>`;
     }).join('');
   }
@@ -498,11 +538,14 @@ function renderStats(s) {
   // Persist selection highlight across re-renders; refresh details if data changed
   lastStats = s;
   if (selectedKey) {
-    const ent  = selectedType === 'entity'      ? s.entities?.find(x => x.key === selectedKey)     : null;
-    const emit = selectedType === 'emitter'     ? s.emitters?.find(x => x._key === selectedKey)    : null;
-    const tx   = selectedType === 'transmitter' ? s.transmitters?.find(x => x._key === selectedKey): null;
-    const sig  = selectedType === 'signal'      ? s.signals?.find(x => x._key === selectedKey)     : null;
-    const fresh = ent || emit || tx || sig;
+    const ent    = selectedType === 'entity'      ? s.entities?.find(x => x.key === selectedKey)           : null;
+    const emit   = selectedType === 'emitter'     ? s.emitters?.find(x => x._key === selectedKey)          : null;
+    const tx     = selectedType === 'transmitter' ? s.transmitters?.find(x => x._key === selectedKey)      : null;
+    const rx     = selectedType === 'receiver'    ? s.receivers?.find(x => x._key === selectedKey)         : null;
+    const sig    = selectedType === 'signal'      ? s.signals?.find(x => x._key === selectedKey)           : null;
+    const icCtrl = selectedType === 'ic-control'  ? s.intercomControls?.find(x => x._key === selectedKey)  : null;
+    const icSig  = selectedType === 'ic-signal'   ? s.intercomSignals?.find(x => x._key === selectedKey)   : null;
+    const fresh = ent || emit || tx || rx || sig || icCtrl || icSig;
     if (fresh) {
       renderDetails(fresh);
       if (selectedType === 'entity') window.MapView.showCallout(buildMapCallout(ent));
@@ -515,6 +558,22 @@ function renderStats(s) {
   window.MapView.update(s.entities);
 }
 function fnum(v, d) { return (v === undefined || v === null || !isFinite(v)) ? '' : Number(v).toFixed(d); }
+
+function ffreq(mhz) {
+  if (!mhz) return '—';
+  const hz = mhz * 1e6;
+  if (hz >= 1e9) return (hz / 1e9).toFixed(4).replace(/\.?0+$/, '') + ' GHz';
+  if (hz >= 1e6) return mhz.toFixed(3).replace(/\.?0+$/, '') + ' MHz';
+  if (hz >= 1e3) return (hz / 1e3).toFixed(1).replace(/\.?0+$/, '') + ' kHz';
+  return Math.round(hz) + ' Hz';
+}
+
+function frate(hz) {
+  if (!hz) return '—';
+  if (hz >= 1e6) return (hz / 1e6).toFixed(3).replace(/\.?0+$/, '') + ' MHz';
+  if (hz >= 1e3) return (hz / 1e3).toFixed(1).replace(/\.?0+$/, '') + ' kHz';
+  return hz + ' Hz';
+}
 
 function buildMapCallout(e) {
   const mpsToKts = v => isFinite(v) ? (v * 1.94384).toFixed(0) : '—';
@@ -569,7 +628,10 @@ function applyTableSelection() {
   tbl('entityTable', 'entity');
   tbl('emitterTable', 'emitter');
   tbl('txTable', 'transmitter');
+  tbl('rxTable', 'receiver');
   tbl('sigTable', 'signal');
+  tbl('icCtrlTable', 'ic-control');
+  tbl('icSigTable', 'ic-signal');
   // fires/detonations use index as key
   document.querySelectorAll('#firesTable tbody tr').forEach(r =>
     r.classList.toggle('selected', selectedType === 'fire' && selectedKey === `fire_${r.dataset.key}`));
@@ -642,14 +704,17 @@ let _audioPopupKey = null;
 
 function markAudioActive(key) {
   if (activeAudioKeys.has(key)) clearTimeout(activeAudioKeys.get(key));
+  const isIcSig = key.startsWith('ic-sig|');
+  const tbodyId = isIcSig ? 'icSigTableBody' : 'sigTableBody';
+  const cls     = isIcSig ? 'ic-sig-active'  : 'sig-active';
   const tid = setTimeout(() => {
     activeAudioKeys.delete(key);
-    document.querySelectorAll(`#sigTableBody tr[data-key="${CSS.escape(key)}"]`)
-      .forEach(r => r.classList.remove('sig-active'));
+    document.querySelectorAll(`#${tbodyId} tr[data-key="${CSS.escape(key)}"]`)
+      .forEach(r => r.classList.remove(cls));
   }, 2500);
   activeAudioKeys.set(key, tid);
-  document.querySelectorAll(`#sigTableBody tr[data-key="${CSS.escape(key)}"]`)
-    .forEach(r => r.classList.add('sig-active'));
+  document.querySelectorAll(`#${tbodyId} tr[data-key="${CSS.escape(key)}"]`)
+    .forEach(r => r.classList.add(cls));
 }
 
 function showAudioPopup(key, anchorEl) {
@@ -750,7 +815,7 @@ function renderDetails(data) {
 
         <dt class="detail-section">Type</dt>
         <dt>Type code</dt><dd>${escapeHtml(e.type||'—')}</dd>
-        ${typeLabel ? `<dt>Inferred Type</dt><dd class="detail-wide-value">${escapeHtml(typeLabel)}</dd>` : ''}
+        ${typeLabel ? `<dt class="detail-wide-label">Inferred Type</dt><dd class="detail-wide-value">${escapeHtml(typeLabel)}</dd>` : ''}
         <dt>Kind</dt><dd>${escapeHtml(e.kind||'—')}</dd>
         <dt>Domain</dt><dd>${escapeHtml(e.domain||'—')}</dd>
 
@@ -900,6 +965,21 @@ function renderDetails(data) {
       <dt>Last seen</dt><dd>${ls}</dd>
     </dl>`;
 
+  } else if (selectedType === 'receiver') {
+    const r = data;
+    const ls = r.lastSeen ? new Date(r.lastSeen).toTimeString().slice(0,8) : '—';
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Receiver</dt>
+      <dt>Entity</dt><dd>${escapeHtml(r.entityIdKey||'—')}</dd>
+      <dt>Radio ID</dt><dd>${r.radioId ?? '—'}</dd>
+      <dt>Receiver state</dt><dd>${escapeHtml(r.receiverStateName||'—')}</dd>
+      <dt>Received power</dt><dd>${r.receivedPower != null ? r.receivedPower + ' dBm' : '—'}</dd>
+      <dt class="detail-subsection">Transmitter</dt>
+      <dt>Entity</dt><dd>${escapeHtml(r.transmitterEntityKey||'—')}</dd>
+      <dt>Radio ID</dt><dd>${r.transmitterRadioId ?? '—'}</dd>
+      <dt>Last seen</dt><dd>${ls}</dd>
+    </dl>`;
+
   } else if (selectedType === 'signal') {
     const sg = data;
     const ls = sg.lastSeen ? new Date(sg.lastSeen).toTimeString().slice(0,8) : '—';
@@ -913,6 +993,48 @@ function renderDetails(data) {
       <dt>Sample rate</dt><dd>${sg.sampleRate||0} Hz</dd>
       <dt>Data length</dt><dd>${sg.dataLengthBits||0} bits</dd>
       <dt>Samples</dt><dd>${sg.numSamples||0}</dd>
+      <dt>Last seen</dt><dd>${ls}</dd>
+    </dl>`;
+
+  } else if (selectedType === 'ic-control') {
+    const ic = data;
+    const ls = ic.lastSeen ? new Date(ic.lastSeen).toTimeString().slice(0,8) : '—';
+    const txStateStr = ic.transmitLineState === 1 ? '1 — Transmitting' : ic.transmitLineState === 0 ? '0 — Not transmitting' : `${ic.transmitLineState ?? '—'}`;
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Intercom Control</dt>
+      <dt>Control type</dt><dd>${escapeHtml(ic.controlTypeName||'—')}</dd>
+      <dt>Channel type</dt><dd>${escapeHtml(ic.channelTypeName||'—')}</dd>
+      <dt class="detail-subsection">Source Entity ID</dt>
+      <dt>Site</dt><dd>${ic.sourceEntityId?.site ?? '—'}</dd>
+      <dt>Application</dt><dd>${ic.sourceEntityId?.application ?? '—'}</dd>
+      <dt>Entity</dt><dd>${ic.sourceEntityId?.entity ?? '—'}</dd>
+      <dt>Source device ID</dt><dd>${ic.sourceDeviceId ?? '—'}</dd>
+      <dt>Source line ID</dt><dd>${ic.sourceLineId ?? '—'}</dd>
+      <dt>Transmit priority</dt><dd>${ic.transmitPriority ?? '—'}</dd>
+      <dt>Transmit line state</dt><dd>${txStateStr}</dd>
+      <dt>Command</dt><dd>${escapeHtml(ic.commandName||'—')}</dd>
+      <dt class="detail-subsection">Master Entity ID</dt>
+      <dt>Site</dt><dd>${ic.masterEntityId?.site ?? '—'}</dd>
+      <dt>Application</dt><dd>${ic.masterEntityId?.application ?? '—'}</dd>
+      <dt>Entity</dt><dd>${ic.masterEntityId?.entity ?? '—'}</dd>
+      <dt>Master device ID</dt><dd>${ic.masterDeviceId ?? '—'}</dd>
+      <dt>Master channel ID</dt><dd>${ic.masterChannelId ?? '—'}</dd>
+      <dt>Last seen</dt><dd>${ls}</dd>
+    </dl>`;
+
+  } else if (selectedType === 'ic-signal') {
+    const ic = data;
+    const ls = ic.lastSeen ? new Date(ic.lastSeen).toTimeString().slice(0,8) : '—';
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Intercom Signal</dt>
+      <dt>Entity</dt><dd>${escapeHtml(ic.entityIdKey||'—')}</dd>
+      <dt>Device ID</dt><dd>${ic.deviceId ?? '—'}</dd>
+      <dt>Encoding class</dt><dd>${escapeHtml(ic.encodingClassName||'—')}</dd>
+      <dt>Encoding type</dt><dd>${ic.encodingType ?? '—'}</dd>
+      <dt>TDL type</dt><dd>${escapeHtml(ic.tdlTypeName||'—')}</dd>
+      <dt>Sample rate</dt><dd>${ic.sampleRate||0} Hz</dd>
+      <dt>Data length</dt><dd>${ic.dataLengthBits||0} bits</dd>
+      <dt>Samples</dt><dd>${ic.numSamples||0}</dd>
       <dt>Last seen</dt><dd>${ls}</dd>
     </dl>`;
   }
@@ -1253,7 +1375,7 @@ function init() {
     } catch { toast('⚠ Upload failed'); }
   });
 
-  function renderSiteAppNamesTable() {
+  renderSiteAppNamesTable = function() {
     const tbody = $('siteAppNamesTable').querySelector('tbody');
     const rows = [
       ...Object.entries(siteNames).map(([id, name]) => ({ type: 'site', id, name })),
@@ -1397,12 +1519,35 @@ function init() {
     const t = lastStats?.transmitters?.find(x => x._key === tr.dataset.key);
     if (t) selectItem(tr.dataset.key, 'transmitter', t);
   });
+  $('rxTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const r = lastStats?.receivers?.find(x => x._key === tr.dataset.key);
+    if (r) selectItem(tr.dataset.key, 'receiver', r);
+  });
   $('sigTable')?.addEventListener('click', e => {
     if (e.target.closest('.audio-gear-btn')) return;
     const tr = e.target.closest('tr[data-key]');
     if (!tr) return;
     const sg = lastStats?.signals?.find(x => x._key === tr.dataset.key);
     if (sg) selectItem(tr.dataset.key, 'signal', sg);
+  });
+  $('icCtrlTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const ic = lastStats?.intercomControls?.find(x => x._key === tr.dataset.key);
+    if (ic) selectItem(tr.dataset.key, 'ic-control', ic);
+  });
+  $('icSigTable')?.addEventListener('click', e => {
+    if (e.target.closest('.audio-gear-btn')) return;
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const ic = lastStats?.intercomSignals?.find(x => x._key === tr.dataset.key);
+    if (ic) selectItem(tr.dataset.key, 'ic-signal', ic);
+  });
+  $('icSigTable')?.addEventListener('click', e => {
+    const btn = e.target.closest('.audio-gear-btn');
+    if (btn) { e.stopPropagation(); showAudioPopup(btn.dataset.key, btn); }
   });
   // PDU Monitor tabs
   document.querySelectorAll('.ptab').forEach(t => t.addEventListener('click', () => {

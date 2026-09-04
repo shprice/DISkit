@@ -302,7 +302,10 @@
         <button class="ptab" data-ptab="fires">Fires</button>
         <button class="ptab" data-ptab="detonations">Dets</button>
         <button class="ptab" data-ptab="transmitters">Transmitters</button>
+        <button class="ptab" data-ptab="receivers">Receivers</button>
         <button class="ptab" data-ptab="signals">Signals</button>
+        <button class="ptab" data-ptab="ic-control">I/C Control</button>
+        <button class="ptab" data-ptab="ic-signal">I/C Signal</button>
       </div>
       <div class="ptabbody" id="ptab-entities">
         <div class="tablewrap">
@@ -315,7 +318,7 @@
       <div class="ptabbody hidden" id="ptab-emitters">
         <div class="tablewrap">
           <table id="emitterTable" class="sel-table">
-            <thead><tr><th>Entity</th><th>Emitter</th><th>Function</th><th>Band</th><th>Freq MHz</th><th>PRF</th><th>ERP</th></tr></thead>
+            <thead><tr><th>Entity</th><th>Emitter</th><th>Function</th><th>Band</th><th>Freq</th><th>PRF</th><th>ERP</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -339,16 +342,40 @@
       <div class="ptabbody hidden" id="ptab-transmitters">
         <div class="tablewrap">
           <table id="txTable" class="sel-table">
-            <thead><tr><th>Entity</th><th>Radio</th><th>State</th><th>Freq MHz</th><th>Band</th><th>Power dBm</th></tr></thead>
+            <thead><tr><th>Entity</th><th>Radio</th><th>State</th><th>Freq</th><th>Band</th><th>Power</th></tr></thead>
             <tbody id="txTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-receivers">
+        <div class="tablewrap">
+          <table id="rxTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Radio</th><th>State</th><th>Rx Power</th><th>Tx Entity</th><th>Tx Radio</th></tr></thead>
+            <tbody id="rxTableBody"></tbody>
           </table>
         </div>
       </div>
       <div class="ptabbody hidden" id="ptab-signals">
         <div class="tablewrap">
           <table id="sigTable" class="sel-table">
-            <thead><tr><th>Entity</th><th>Radio</th><th>Encoding</th><th>TDL</th><th>Rate Hz</th><th>Bits</th><th></th></tr></thead>
+            <thead><tr><th>Entity</th><th>Radio</th><th>Encoding</th><th>TDL</th><th>Rate</th><th>Bits</th><th></th></tr></thead>
             <tbody id="sigTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-ic-control">
+        <div class="tablewrap">
+          <table id="icCtrlTable" class="sel-table">
+            <thead><tr><th>Source</th><th>Dev</th><th>Line</th><th>State</th><th>Control</th><th>Command</th><th>Pri</th></tr></thead>
+            <tbody id="icCtrlTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ptabbody hidden" id="ptab-ic-signal">
+        <div class="tablewrap">
+          <table id="icSigTable" class="sel-table">
+            <thead><tr><th>Entity</th><th>Device</th><th>Encoding</th><th>TDL</th><th>Rate</th><th>Bits</th><th></th></tr></thead>
+            <tbody id="icSigTableBody"></tbody>
           </table>
         </div>
       </div>

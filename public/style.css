@@ -245,6 +245,8 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .sel-table tbody tr.selected { background: rgba(47,129,247,0.15); outline: none; }
 .sel-table tbody tr.tx-active { color: var(--green); }
 .sel-table tbody tr.tx-active td:nth-child(3) { font-weight: 600; }
+.sel-table tbody tr.rx-active { color: var(--green); }
+.sel-table tbody tr.rx-active td:nth-child(3) { font-weight: 600; }
 
 .details { grid-area: details; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .details > h3, .details .panel-hdr { flex-shrink: 0; }
@@ -265,7 +267,7 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .detail-symbol { text-align: center; margin-bottom: 6px; }
 .enum-type { color: var(--accent); }
 /* Full-width detail row (for long inferred type labels) */
-.detail-wide-label { /* same as dt, no override needed */ }
+.detail-wide-label { grid-column: 1; }
 .detail-wide-value { grid-column: 2 / -1; color: var(--accent); word-break: break-word; margin: 0; }
 /* Filter indicators */
 .tab-filter-icon {
@@ -286,9 +288,8 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 /* Leaflet selection pulse ring — CSS animation, no JS required */
 .map-sel-pulse {
   width: 88px; height: 88px;
-  border: 2.5px solid rgba(210, 160, 20, 0.95);
+  background: rgba(255, 215, 0, 0.40);
   border-radius: 50%;
-  box-sizing: border-box;
   animation: map-sel-pulse 1.2s ease-in-out infinite;
   pointer-events: none;
   position: absolute; top: 0; left: 0;
@@ -529,6 +530,9 @@ main.map-expanded .horiz-resize-handle { display: none; }
 /* Active signal row (audio in progress) */
 .sel-table tbody tr.sig-active { color: var(--green); }
 .sel-table tbody tr.sig-active .audio-gear-btn { border-color: var(--green); color: var(--green); }
+.sel-table tbody tr.ic-ctrl-active { color: var(--green); }
+.sel-table tbody tr.ic-ctrl-active td:nth-child(4) { font-weight: 600; }
+.sel-table tbody tr.ic-sig-active { color: var(--green); }
 /* Floating audio settings popup */
 .audio-popup {
   position: fixed; z-index: 9000; min-width: 200px;

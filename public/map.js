@@ -580,13 +580,10 @@ const MapView = (() => {
         if (e.key === selectedKey) {
           const t = performance.now();
           const pulse = Math.sin(t / 300) * 0.5 + 0.5;
-          const pr = 14 + pulse * 6;
+          const pr = 14 + pulse * 8;
           ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 2 * Math.PI);
-          ctx.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.45})`;
-          ctx.lineWidth = 2; ctx.stroke();
-          ctx.beginPath(); ctx.arc(p.x, p.y, pr + 5, 0, 2 * Math.PI);
-          ctx.strokeStyle = `rgba(47,129,247,${0.25 + pulse * 0.35})`;
-          ctx.lineWidth = 1.5; ctx.stroke();
+          ctx.fillStyle = `rgba(255,215,0,${0.15 + pulse * 0.25})`;
+          ctx.fill();
         }
         ctx.fillStyle = '#c7d0da'; ctx.font = '10px system-ui';
         ctx.fillText(e.marking || '', p.x + 8, p.y + 3);
@@ -755,28 +752,26 @@ const MapView = (() => {
       sy = ((1 - (ent.lat - b.minLat) / (b.maxLat - b.minLat)) * mapH + oy) * zoom + panY;
       containerW = w; containerH = h;
     } else return;
-    const OFFSET = 55;
+    const M = 8;
     const cw = calloutEl.offsetWidth || 220;
     const ch = calloutEl.offsetHeight || 160;
-    // Prefer right of entity, fall back to left
-    let left = (sx + OFFSET + cw <= containerW - 8) ? sx + OFFSET : sx - OFFSET - cw;
-    // Center vertically on entity, clamp to bounds
-    let top = Math.max(8, Math.min(containerH - ch - 8, sy - ch / 2));
-    left = Math.max(4, left);
+    // Place in the corner diagonally opposite the entity for maximum separation
+    const left = sx < containerW / 2 ? containerW - cw - M : M;
+    const top  = sy < containerH / 2 ? containerH - ch - M : M;
     calloutEl.style.left = left + 'px';
-    calloutEl.style.top = top + 'px';
-    // SVG line from entity to nearest callout edge
+    calloutEl.style.top  = top  + 'px';
+    // SVG connector: line from entity to nearest point on callout rect
     if (!calloutSvgEl) {
       calloutSvgEl  = document.getElementById('mapCalloutSvg');
       calloutSvgLine = document.getElementById('mapCalloutSvgLine');
       calloutSvgDot  = document.getElementById('mapCalloutSvgDot');
     }
     if (calloutSvgLine && calloutSvgDot) {
-      const lineX2 = (left > sx) ? left : left + cw;
-      const lineY2 = Math.max(top, Math.min(top + ch, sy));
-      calloutSvgLine.setAttribute('x1', sx); calloutSvgLine.setAttribute('y1', sy);
+      const lineX2 = Math.max(left, Math.min(left + cw, sx));
+      const lineY2 = Math.max(top,  Math.min(top  + ch, sy));
+      calloutSvgLine.setAttribute('x1', sx);     calloutSvgLine.setAttribute('y1', sy);
       calloutSvgLine.setAttribute('x2', lineX2); calloutSvgLine.setAttribute('y2', lineY2);
-      calloutSvgDot.setAttribute('cx', sx); calloutSvgDot.setAttribute('cy', sy);
+      calloutSvgDot.setAttribute('cx', sx);      calloutSvgDot.setAttribute('cy', sy);
     }
   }
 

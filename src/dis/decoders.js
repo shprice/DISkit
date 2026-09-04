@@ -311,6 +311,88 @@ function decodeSignal(buf) {
   };
 }
 
+// --- Receiver PDU (type 27) ---------------------------------------------------
+const RECEIVER_STATE = { 0: 'Off', 1: 'On (idle)', 2: 'Receiving' };
+
+function decodeReceiver(buf) {
+  if (buf.length < HDR + 24) return { truncated: true };
+  let o = HDR;
+  const entityId = readEntityId(buf, o); o += 6;
+  const radioId = buf.readUInt16BE(o); o += 2;
+  const receiverState = buf.readUInt16BE(o); o += 2;
+  o += 2; // padding
+  const receivedPower = buf.readFloatBE(o); o += 4;
+  const transmitterEntityId = readEntityId(buf, o); o += 6;
+  const transmitterRadioId = buf.readUInt16BE(o); o += 2;
+  return {
+    entityId, entityIdKey: entityIdKey(entityId), radioId,
+    receiverState, receiverStateName: RECEIVER_STATE[receiverState] || `State ${receiverState}`,
+    receivedPower: isFinite(receivedPower) ? +receivedPower.toFixed(1) : null,
+    transmitterEntityId,
+    transmitterEntityKey: entityIdKey(transmitterEntityId),
+    transmitterRadioId,
+    _key: `${entityIdKey(entityId)}|${radioId}`,
+  };
+}
+
+// --- Intercom Signal PDU (type 31) -------------------------------------------
+function decodeIntercomSignal(buf) {
+  if (buf.length < HDR + 20) return { truncated: true };
+  let o = HDR;
+  const entityId = readEntityId(buf, o); o += 6;
+  const deviceId = buf.readUInt16BE(o); o += 2;
+  const encodingWord = buf.readUInt16BE(o); o += 2;
+  const encodingClass = (encodingWord >> 14) & 0x3;
+  const encodingType = encodingWord & 0x3FFF;
+  const tdlType = buf.readUInt16BE(o); o += 2;
+  const sampleRate = buf.readUInt32BE(o); o += 4;
+  const dataLengthBits = buf.readUInt16BE(o); o += 2;
+  const numSamples = buf.readUInt16BE(o); o += 2;
+  const audioData = buf.length > o ? buf.subarray(o) : null;
+  return {
+    entityId, entityIdKey: entityIdKey(entityId), deviceId,
+    encodingClass, encodingClassName: ENCODING_CLASS_NAMES[encodingClass] || 'Unknown',
+    encodingType, tdlType, tdlTypeName: TDL_TYPE_NAMES[tdlType] || `TDL ${tdlType}`,
+    sampleRate, dataLengthBits, numSamples, audioData,
+    _key: `ic-sig|${entityIdKey(entityId)}|${deviceId}`,
+  };
+}
+
+// --- Intercom Control PDU (type 32) ------------------------------------------
+const IC_CONTROL_TYPE = { 0: 'Reserved', 1: 'Status', 2: 'Request (ack)', 3: 'Request (no ack)', 4: 'Ack', 5: 'Nack' };
+const IC_CHANNEL_TYPE = { 0: 'Reserved', 1: 'Connection A', 2: 'Connection B' };
+const IC_COMMAND = { 0: 'No command', 1: 'Status', 2: 'Connect', 3: 'Disconnect', 4: 'Freeze signal', 5: 'Thaw signal', 6: 'Freeze', 7: 'Thaw' };
+
+function decodeIntercomControl(buf) {
+  if (buf.length < HDR + 14) return { truncated: true };
+  let o = HDR;
+  const controlType = buf.readUInt8(o); o += 1;
+  const channelType = buf.readUInt8(o); o += 1;
+  const sourceEntityId = readEntityId(buf, o); o += 6;
+  const sourceDeviceId = buf.readUInt16BE(o); o += 2;
+  const sourceLineId = buf.readUInt8(o); o += 1;
+  const transmitPriority = buf.readUInt8(o); o += 1;
+  const transmitLineState = buf.readUInt8(o); o += 1;
+  const command = buf.readUInt8(o); o += 1;
+  const masterEntityId = (o + 6 <= buf.length) ? readEntityId(buf, o) : null;
+  if (masterEntityId) o += 6;
+  const masterDeviceId = (o + 2 <= buf.length) ? buf.readUInt16BE(o) : null;
+  if (masterDeviceId !== null) o += 2;
+  const masterChannelId = (o + 2 <= buf.length) ? buf.readUInt16BE(o) : null;
+  const sourceKey = entityIdKey(sourceEntityId);
+  return {
+    sourceEntityId, sourceEntityKey: sourceKey,
+    sourceDeviceId, sourceLineId,
+    controlType, controlTypeName: IC_CONTROL_TYPE[controlType] || `Type ${controlType}`,
+    channelType, channelTypeName: IC_CHANNEL_TYPE[channelType] || `Chan ${channelType}`,
+    transmitPriority, transmitLineState,
+    command, commandName: IC_COMMAND[command] || `Cmd ${command}`,
+    masterEntityId, masterEntityKey: masterEntityId ? entityIdKey(masterEntityId) : null,
+    masterDeviceId, masterChannelId,
+    _key: `ic-ctrl|${sourceKey}|${sourceDeviceId}|${sourceLineId}`,
+  };
+}
+
 // --- Decoder Registry Map ----------------------------------------------------
 
 export const PDU_DECODERS = new Map([
@@ -321,6 +403,9 @@ export const PDU_DECODERS = new Map([
   [24, decodeDesignator],
   [25, decodeTransmitter],
   [26, decodeSignal],
+  [27, decodeReceiver],
+  [31, decodeIntercomSignal],
+  [32, decodeIntercomControl],
 ]);
 
 /**

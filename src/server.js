@@ -200,7 +200,7 @@ setInterval(() => {
 
 const sampleBuffer = [];
 function onSample(sample) {
-  if (sample.header.pduType === 26 && sample.body?.encodingClass === 0) {
+  if ((sample.header.pduType === 26 || sample.header.pduType === 31) && sample.body?.encodingClass === 0) {
     const b = sample.body;
     const pcm = decodeAudioPayload(b.encodingClass, b.encodingType, b.audioData, b._key);
     if (pcm && pcm.length > 0) {

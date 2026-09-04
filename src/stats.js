@@ -4,8 +4,10 @@
 
 import { pduTypeName } from './dis/enums.js';
 
-const EMITTER_TTL_MS = 15000;
-const SIGNAL_TTL_MS  = 30000;
+const EMITTER_TTL_MS   = 15000;
+const SIGNAL_TTL_MS    = 30000;
+const IC_CTRL_TTL_MS   = 15000;
+const IC_SIGNAL_TTL_MS = 30000;
 
 export class Stats {
   constructor({ entityTimeoutSecs = 5 } = {}) {
@@ -24,8 +26,11 @@ export class Stats {
     this.emitters = new Map();      // emittingKey -> { systems, lastSeen }
     this.fires = [];                // rolling log of last 200 Fire events
     this.detonations = [];          // rolling log of last 200 Detonation events
-    this.transmitters = new Map();  // entityKey|radioId -> transmitter record
-    this.signalStates = new Map();  // entityKey|radioId -> latest signal state
+    this.transmitters = new Map();     // entityKey|radioId -> transmitter record
+    this.receivers = new Map();        // entityKey|radioId -> receiver record
+    this.signalStates = new Map();     // entityKey|radioId -> latest signal state
+    this.intercomControls = new Map(); // ic-ctrl|sourceKey|devId|lineId -> control record
+    this.intercomSignals = new Map();  // ic-sig|entityKey|devId -> signal record
     this.startTime = Date.now();
     this.rateWindow = [];           // timestamps (ms) for PDU/s estimate
     this.byteRateWindow = [];       // {t, b} pairs for MB/s estimate
@@ -132,9 +137,21 @@ export class Stats {
       });
     }
 
+    if (header.pduType === 27 && body && body.entityIdKey) {
+      this.receivers.set(body._key, { ...body, lastSeen: now });
+    }
+
     if (header.pduType === 26 && body && body.entityIdKey) {
       const key = body._key || `${body.entityIdKey}|${body.radioId}`;
       this.signalStates.set(key, { ...body, lastSeen: now });
+    }
+
+    if (header.pduType === 31 && body && body.entityIdKey) {
+      this.intercomSignals.set(body._key, { ...body, lastSeen: now });
+    }
+
+    if (header.pduType === 32 && body && body.sourceEntityKey) {
+      this.intercomControls.set(body._key, { ...body, lastSeen: now });
     }
   }
 
@@ -149,8 +166,17 @@ export class Stats {
     for (const [k, t] of this.transmitters) {
       if (now - t.lastSeen > EMITTER_TTL_MS) this.transmitters.delete(k);
     }
+    for (const [k, r] of this.receivers) {
+      if (now - r.lastSeen > EMITTER_TTL_MS) this.receivers.delete(k);
+    }
     for (const [k, s] of this.signalStates) {
       if (now - s.lastSeen > SIGNAL_TTL_MS) this.signalStates.delete(k);
+    }
+    for (const [k, ic] of this.intercomControls) {
+      if (now - ic.lastSeen > IC_CTRL_TTL_MS) this.intercomControls.delete(k);
+    }
+    for (const [k, ic] of this.intercomSignals) {
+      if (now - ic.lastSeen > IC_SIGNAL_TTL_MS) this.intercomSignals.delete(k);
     }
   }
 
@@ -243,7 +269,10 @@ export class Stats {
       fires: this.fires.slice(0, 100),
       detonations: this.detonations.slice(0, 100),
       transmitters: Array.from(this.transmitters.values()),
+      receivers: Array.from(this.receivers.values()),
       signals: Array.from(this.signalStates.values()),
+      intercomControls: Array.from(this.intercomControls.values()),
+      intercomSignals: Array.from(this.intercomSignals.values()),
     };
   }
 }
