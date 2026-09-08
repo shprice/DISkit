@@ -6,6 +6,8 @@
 const MapView = (() => {
   let canvas, ctx, leafletEl;
   let useTiles = false;
+  let useSatellite = false;
+  let baseTileLayer = null; // currently active Leaflet tile layer
   let leaflet = null;       // Leaflet map instance
   let markers = new Map();  // key -> Leaflet marker
   let lastEntities = [];
@@ -32,13 +34,16 @@ const MapView = (() => {
   let selectedKey = null;
   let onEntityClick = null;
   let animFrame = null;
-  let pulseRing = null;       // Leaflet circleMarker for selection pulse animation
   let calloutEl = null, calloutSvgEl = null, calloutSvgLine = null, calloutSvgDot = null;
 
   let showDirections = false;  // draw heading arrows
   let showDR = false;          // overlay dead-reckoned positions
   let showBoth = false;        // show ground-truth AND DR together
   let followSelected = false;  // keep map centred on selected entity
+  let showMunitions    = true;
+  let showDesignations = true;
+  let showDetonations  = true;
+  let forceFilter = null; // null = show all; Set of forceId numbers otherwise
 
   // WGS-84 ECEF → geodetic (lat°, lon°, alt m)
   function ecefToLlh(x, y, z) {
@@ -206,13 +211,13 @@ const MapView = (() => {
          3: { ss: '05', entity: '110700', label: 'Space Launch' },
       },
     },
-    2: { // Munition
-      _:  { ss: '01', entity: '110100', label: 'Munition' },
-      1: { _: { ss: '10', entity: '120900', label: 'Munition (Land)' } },
-      2: { _: { ss: '01', entity: '110100', label: 'Munition (Air)' } },
-      3: { _: { ss: '30', entity: '120203', label: 'Munition (Sea)' } },
-      4: { _: { ss: '35', entity: '110100', label: 'Munition (Sub)' } },
-      5: { _: { ss: '05', entity: '110700', label: 'Munition (Space)' } },
+    2: { // Munition — use missile-specific symbol sets per MIL-STD-2525D
+      _:  { ss: '02', entity: '110000', label: 'Munition' },
+      1: { _: { ss: '15', entity: '110000', label: 'Munition (Land)' } },   // Land Missile (ss 15)
+      2: { _: { ss: '02', entity: '110000', label: 'Munition (Air)' } },    // Air Missile (ss 02)
+      3: { _: { ss: '30', entity: '110000', label: 'Munition (Sea)' } },    // Sea Surface
+      4: { _: { ss: '35', entity: '110000', label: 'Munition (Sub)' } },    // Sea Subsurface
+      5: { _: { ss: '06', entity: '110000', label: 'Munition (Space)' } },  // Space Missile (ss 06)
     },
     3: { // Life Form
       _:  { ss: '10', entity: '121100', label: 'Infantry' },
@@ -543,24 +548,77 @@ const MapView = (() => {
     const drawGT = !showDR || showBoth;
     for (const e of lastEntities) {
       if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
+      if (forceFilter && !forceFilter.has(e.forceId)) continue;
       const hdg = (e.heading || 0) * Math.PI / 180;
       const col = forceColors[e.forceId] || '#c9a227';
 
       if (drawGT) {
         const p = project(e.lat, e.lon);
         if (p.x < -40 || p.x > w + 40 || p.y < -40 || p.y > h + 40) continue;
-        const sidc = entityToSidc(e);
-        const sym = sidc ? getOrCreateSymbol(sidc) : null;
-        if (sym?.ready) {
-          ctx.drawImage(sym.img, p.x - sym.anchor.x, p.y - sym.anchor.y, sym.size.width, sym.size.height);
-        } else {
+        if (e.key === selectedKey) {
+          ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, 2 * Math.PI);
+          ctx.fillStyle = 'rgba(255,255,255,0.2)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.fill(); ctx.stroke();
+        }
+        const simKind = munitionSimpleKind(e);
+        if (!showMunitions && simKind !== null) {
+          // munitions hidden by toggle — skip
+        } else if (simKind === 'ballistic') {
+          // Bullet silhouette: pointed nose, flat base — half missile size
           ctx.save();
           ctx.translate(p.x, p.y); ctx.rotate(hdg);
           ctx.fillStyle = col;
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.5;
           ctx.beginPath();
-          ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
-          ctx.fill();
+          ctx.moveTo(0, -4);
+          ctx.lineTo(1.5, -2);
+          ctx.lineTo(1.5, 3);
+          ctx.lineTo(0.5, 4);
+          ctx.lineTo(-0.5, 4);
+          ctx.lineTo(-1.5, 3);
+          ctx.lineTo(-1.5, -2);
+          ctx.closePath();
+          ctx.fill(); ctx.stroke();
           ctx.restore();
+        } else if (simKind === 'missile') {
+          // Top-down missile silhouette: fuselage + swept delta wings + tail fins
+          ctx.save();
+          ctx.translate(p.x, p.y); ctx.rotate(hdg);
+          ctx.fillStyle = col;
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(0, -8);
+          ctx.lineTo(1, -3);
+          ctx.lineTo(5, 2);
+          ctx.lineTo(1.5, 3);
+          ctx.lineTo(2, 7);
+          ctx.lineTo(0.5, 6);
+          ctx.lineTo(0.5, 4);
+          ctx.lineTo(-0.5, 4);
+          ctx.lineTo(-0.5, 6);
+          ctx.lineTo(-2, 7);
+          ctx.lineTo(-1.5, 3);
+          ctx.lineTo(-5, 2);
+          ctx.lineTo(-1, -3);
+          ctx.closePath();
+          ctx.fill(); ctx.stroke();
+          ctx.restore();
+        } else {
+          const sidc = entityToSidc(e);
+          const sym = sidc ? getOrCreateSymbol(sidc) : null;
+          if (sym?.ready) {
+            ctx.drawImage(sym.img, p.x - sym.anchor.x, p.y - sym.anchor.y, sym.size.width, sym.size.height);
+          } else {
+            ctx.save();
+            ctx.translate(p.x, p.y); ctx.rotate(hdg);
+            ctx.fillStyle = col;
+            ctx.beginPath();
+            ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
         }
         if (showDirections) {
           const len = 25;
@@ -576,14 +634,6 @@ const MapView = (() => {
           ctx.lineTo(ax + Math.sin(hdg + 2.5) * 5, ay - Math.cos(hdg + 2.5) * 5);
           ctx.closePath(); ctx.fill();
           ctx.restore();
-        }
-        if (e.key === selectedKey) {
-          const t = performance.now();
-          const pulse = Math.sin(t / 300) * 0.5 + 0.5;
-          const pr = 14 + pulse * 8;
-          ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 2 * Math.PI);
-          ctx.fillStyle = `rgba(255,215,0,${0.15 + pulse * 0.25})`;
-          ctx.fill();
         }
         ctx.fillStyle = '#c7d0da'; ctx.font = '10px system-ui';
         ctx.fillText(e.marking || '', p.x + 8, p.y + 3);
@@ -608,28 +658,62 @@ const MapView = (() => {
     if (showDR || showBoth) {
       for (const e of lastEntities) {
         if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
+        if (forceFilter && !forceFilter.has(e.forceId)) continue;
         const drPos = computeDrPosition(e);
         if (!drPos || !isFinite(drPos.lat) || !isFinite(drPos.lon)) continue;
         const dp = project(drPos.lat, drPos.lon);
         if (dp.x < -40 || dp.x > w + 40 || dp.y < -40 || dp.y > h + 40) continue;
         const hdg = (e.heading || 0) * Math.PI / 180;
         const col = forceColors[e.forceId] || '#c9a227';
-        ctx.save();
-        ctx.globalAlpha = 0.5;
-        ctx.translate(dp.x, dp.y); ctx.rotate(hdg);
-        ctx.strokeStyle = '#3fb950'; ctx.fillStyle = col;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        ctx.restore();
-        if (showDirections) {
-          const len = 25;
-          const dx = Math.sin(hdg) * len, dy = -Math.cos(hdg) * len;
+        if (showBoth) {
           ctx.save();
           ctx.globalAlpha = 0.5;
+          ctx.translate(dp.x, dp.y);
+          ctx.strokeStyle = '#3fb950'; ctx.fillStyle = col;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(0, 0, 7, 0, 2 * Math.PI);
+          ctx.fill(); ctx.stroke();
+          ctx.restore();
+        } else {
+          const simKind2 = munitionSimpleKind(e);
+          ctx.save();
+          ctx.globalAlpha = 0.45;
+          if (simKind2 === 'ballistic') {
+            ctx.translate(dp.x, dp.y); ctx.rotate(hdg);
+            ctx.fillStyle = col; ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(0,-4); ctx.lineTo(1.5,-2); ctx.lineTo(1.5,3);
+            ctx.lineTo(0.5,4); ctx.lineTo(-0.5,4); ctx.lineTo(-1.5,3); ctx.lineTo(-1.5,-2);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+          } else if (simKind2 === 'missile') {
+            ctx.translate(dp.x, dp.y); ctx.rotate(hdg);
+            ctx.fillStyle = col; ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(0,-8); ctx.lineTo(1,-3); ctx.lineTo(5,2);
+            ctx.lineTo(1.5,3); ctx.lineTo(2,7); ctx.lineTo(0.5,6); ctx.lineTo(0.5,4);
+            ctx.lineTo(-0.5,4); ctx.lineTo(-0.5,6); ctx.lineTo(-2,7);
+            ctx.lineTo(-1.5,3); ctx.lineTo(-5,2); ctx.lineTo(-1,-3);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+          } else {
+            const sidc = entityToSidc(e);
+            const sym = sidc ? getOrCreateSymbol(sidc) : null;
+            if (sym?.ready) {
+              ctx.drawImage(sym.img, dp.x - sym.anchor.x, dp.y - sym.anchor.y, sym.size.width, sym.size.height);
+            } else {
+              ctx.translate(dp.x, dp.y); ctx.rotate(hdg);
+              ctx.fillStyle = col;
+              ctx.beginPath(); ctx.moveTo(0,-7); ctx.lineTo(5,6); ctx.lineTo(-5,6); ctx.closePath(); ctx.fill();
+            }
+          }
+          ctx.restore();
+        }
+        if (showDirections && isFinite(e.heading)) {
+          const len = 25;
+          const dx2 = Math.sin(hdg) * len, dy2 = -Math.cos(hdg) * len;
+          ctx.save();
+          ctx.globalAlpha = 0.45;
           ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(dp.x, dp.y); ctx.lineTo(dp.x + dx, dp.y + dy); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(dp.x, dp.y); ctx.lineTo(dp.x + dx2, dp.y + dy2); ctx.stroke();
           ctx.restore();
         }
       }
@@ -664,6 +748,59 @@ const MapView = (() => {
       ctx.restore();
     }
 
+    // --- Designation lines ---
+    if (lastDesignators.length && showDesignations) {
+      const entMap = new Map(lastEntities.map(e => [e.key, e]));
+      const dashOffset = (performance.now() / 40) % 10; // marching-ants speed
+      ctx.save();
+      ctx.strokeStyle = '#ff3300';
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.85;
+      for (const d of lastDesignators) {
+        const src = entMap.get(d.designatingKey);
+        if (!src || !isFinite(src.lat)) continue;
+        const tgt = resolveDesigTarget(d, entMap);
+        if (!tgt || !isFinite(tgt.lat)) continue;
+        const sp = project(src.lat, src.lon);
+        const tp = project(tgt.lat, tgt.lon);
+        // Animated dashed laser line
+        ctx.setLineDash([6, 4]);
+        ctx.lineDashOffset = -dashOffset;
+        ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(tp.x, tp.y); ctx.stroke();
+        // Crosshair at lase point: circle + gap-separated tick marks
+        ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
+        const r = 4;
+        ctx.beginPath(); ctx.arc(tp.x, tp.y, r, 0, 2 * Math.PI); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(tp.x - r - 5, tp.y); ctx.lineTo(tp.x - r, tp.y);
+        ctx.moveTo(tp.x + r, tp.y);     ctx.lineTo(tp.x + r + 5, tp.y);
+        ctx.moveTo(tp.x, tp.y - r - 5); ctx.lineTo(tp.x, tp.y - r);
+        ctx.moveTo(tp.x, tp.y + r);     ctx.lineTo(tp.x, tp.y + r + 5);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // --- Detonation burst animations ---
+    if (detonationAnims.length) {
+      const now = performance.now();
+      ctx.save();
+      for (let i = detonationAnims.length - 1; i >= 0; i--) {
+        const anim = detonationAnims[i];
+        const elapsed = now - anim.startTime;
+        const DURATION = 700;
+        if (elapsed >= DURATION) { detonationAnims.splice(i, 1); continue; }
+        const t = elapsed / DURATION;
+        const ap = project(anim.lat, anim.lon);
+        ctx.beginPath();
+        ctx.arc(ap.x, ap.y, t * 44, 0, 2 * Math.PI);
+        ctx.fillStyle = `rgba(255,80,0,${(1 - t) * 0.55})`;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // Save current visible canvas geographic extent for provider-switch sync
     canvasSyncView = {
       minLon: b.minLon + ((0 - panX) / zoom - ox) / mapW * (b.maxLon - b.minLon),
@@ -693,7 +830,7 @@ const MapView = (() => {
   // Pulse ring is a CSS-animated divIcon — no JS RAF needed for the animation itself.
   // The RAF loop is only used for: canvas pulse/DR (via draw()), Leaflet DR position smoothing.
   function needsLoop() {
-    return (!useTiles && (!!selectedKey || showDR || showBoth)) || (useTiles && (showDR || showBoth));
+    return (!useTiles && (showDR || showBoth || detonationAnims.length > 0 || (showDesignations && lastDesignators.length > 0))) || (useTiles && (showDR || showBoth));
   }
 
   function ensureLoop() {
@@ -718,21 +855,6 @@ const MapView = (() => {
 
   function stopLoop() {
     if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
-  }
-
-  function makePulseRing(lat, lon) {
-    if (!leaflet || !window.L) return null;
-    ensurePanes();
-    return window.L.marker([lat, lon], {
-      icon: window.L.divIcon({
-        html: '<div class="map-sel-pulse"></div>',
-        className: '',
-        iconSize: [88, 88],
-        iconAnchor: [44, 44],
-      }),
-      pane: 'selPane',
-      interactive: false,
-    }).addTo(leaflet);
   }
 
   function updateCalloutPosition() {
@@ -811,13 +933,23 @@ const MapView = (() => {
       if (calloutSvgEl) calloutSvgEl.classList.add('hidden');
     }
     if (useTiles) {
-      if (pulseRing && leaflet) { leaflet.removeLayer(pulseRing); pulseRing = null; }
-      if (ent && isFinite(ent.lat) && isFinite(ent.lon)) pulseRing = makePulseRing(ent.lat, ent.lon);
       updateLeaflet();
     } else {
       draw();
     }
     if (needsLoop()) ensureLoop(); else stopLoop();
+  }
+
+  // Detonation animations (canvas mode)
+  const detonationAnims = []; // { lat, lon, startTime }
+
+  // Returns 'missile' or 'ballistic' for any kind=2 (Munition) entity, null otherwise.
+  // DRM_FVW (5) and DRM_FVB (9) are fixed-velocity DR — used for unguided projectiles.
+  function munitionSimpleKind(entity) {
+    const parts = (entity.type || '').split(/[.\-]/);
+    if (+parts[0] !== 2) return null;
+    const dr = entity.drAlgorithm;
+    return (dr === 5 || dr === 9) ? 'ballistic' : 'missile';
   }
 
   function update(entities) {
@@ -872,6 +1004,29 @@ const MapView = (() => {
     } catch { return null; }
   }
 
+  function makeSimpleMunitionIcon(col, hdgDeg, kind) {
+    const r = (hdgDeg || 0).toFixed(1);
+    let svg, w, h, ax, ay;
+    if (kind === 'ballistic') {
+      svg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="14" viewBox="-6 -7 12 14">
+        <g transform="rotate(${r})">
+          <polygon points="0,-4 1.5,-2 1.5,3 0.5,4 -0.5,4 -1.5,3 -1.5,-2"
+                   fill="${col}" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+        </g>
+      </svg>`;
+      w = 12; h = 14; ax = 6; ay = 7;
+    } else {
+      svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="20" viewBox="-11 -9 22 18">
+        <g transform="rotate(${r})">
+          <polygon points="0,-8 1,-3 5,2 1.5,3 2,7 0.5,6 0.5,4 -0.5,4 -0.5,6 -2,7 -1.5,3 -5,2 -1,-3"
+                   fill="${col}" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+        </g>
+      </svg>`;
+      w = 22; h = 20; ax = 11; ay = 9;
+    }
+    return window.L.divIcon({ html: svg, className: '', iconSize: [w, h], iconAnchor: [ax, ay] });
+  }
+
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -880,6 +1035,10 @@ const MapView = (() => {
   const dirLines = new Map();
   const dirArrows = new Map();
   const drMarkers = new Map();
+
+  let lastDesignators = [];
+  const desigLines = new Map();  // _key -> Leaflet polyline
+  const desigSpots = new Map();  // _key -> Leaflet circleMarker
 
   // Compute a lat/lon endpoint `d` metres in the heading direction (degrees,
   // clockwise from North).  headingDeg is already a true compass bearing after
@@ -921,40 +1080,62 @@ const MapView = (() => {
     const seen = new Set();
     for (const e of list) {
       if (!isFinite(e.lat) || !isFinite(e.lon)) continue;
+      const simKind = munitionSimpleKind(e);
+      if (simKind !== null && !showMunitions) continue; // hidden munition — not added to seen → marker cleaned up
+      if (forceFilter && !forceFilter.has(e.forceId)) continue; // hidden by force filter
       seen.add(e.key);
       const col = forceColors[e.forceId] || '#c9a227';
       let m = markers.get(e.key);
       const label = escapeHtml(e.marking || e.key);
       const isSelected = e.key === selectedKey;
-      const milIcon = makeMilIcon(e);
 
       if (!m) {
-        if (milIcon) {
-          m = window.L.marker([e.lat, e.lon], { icon: milIcon });
+        if (simKind !== null) {
+          m = window.L.marker([e.lat, e.lon], { icon: makeSimpleMunitionIcon(col, e.heading, simKind) });
         } else {
-          m = window.L.circleMarker([e.lat, e.lon], { radius: isSelected ? 10 : 6, color: isSelected ? '#ffffff' : col, fillColor: col, fillOpacity: 0.8, weight: isSelected ? 3 : 1 });
+          const milIcon = makeMilIcon(e);
+          if (milIcon) {
+            m = window.L.marker([e.lat, e.lon], { icon: milIcon });
+          } else {
+            m = window.L.circleMarker([e.lat, e.lon], { radius: isSelected ? 10 : 6, color: isSelected ? '#ffffff' : col, fillColor: col, fillOpacity: 0.8, weight: isSelected ? 3 : 1 });
+          }
         }
         m.addTo(leaflet); markers.set(e.key, m);
         m.bindTooltip(label, { permanent: false, sticky: true });
         m.on('click', (ev) => { window.L.DomEvent.stopPropagation(ev); if (onEntityClick) onEntityClick(e.key); });
       } else {
-        const isMilMarker = !m.setStyle;
-        if (milIcon && !isMilMarker) {
-          leaflet.removeLayer(m);
-          m = window.L.marker([e.lat, e.lon], { icon: milIcon });
-          m.addTo(leaflet); markers.set(e.key, m);
-          m.bindTooltip(label, { permanent: false, sticky: true });
-          m.on('click', (ev) => { window.L.DomEvent.stopPropagation(ev); if (onEntityClick) onEntityClick(e.key); });
-        } else {
-          m.setLatLng([e.lat, e.lon]);
-          if (milIcon) {
-            m.setIcon(milIcon);
-          } else if (m.setStyle) {
-            m.setStyle({ color: isSelected ? '#ffffff' : col, fillColor: col, weight: isSelected ? 3 : 1 });
-            m.setRadius(isSelected ? 10 : 6);
+        if (simKind !== null) {
+          if (m.setStyle) {
+            // was a circleMarker — replace with marker
+            leaflet.removeLayer(m);
+            m = window.L.marker([e.lat, e.lon], { icon: makeSimpleMunitionIcon(col, e.heading, simKind) });
+            m.addTo(leaflet); markers.set(e.key, m);
+            m.bindTooltip(label, { permanent: false, sticky: true });
+            m.on('click', (ev) => { window.L.DomEvent.stopPropagation(ev); if (onEntityClick) onEntityClick(e.key); });
+          } else {
+            m.setLatLng([e.lat, e.lon]);
+            m.setIcon(makeSimpleMunitionIcon(col, e.heading, simKind));
           }
-          if (m.getTooltip()?.getContent() !== label) m.setTooltipContent(label);
+        } else {
+          const milIcon = makeMilIcon(e);
+          const isMilMarker = !m.setStyle;
+          if (milIcon && !isMilMarker) {
+            leaflet.removeLayer(m);
+            m = window.L.marker([e.lat, e.lon], { icon: milIcon });
+            m.addTo(leaflet); markers.set(e.key, m);
+            m.bindTooltip(label, { permanent: false, sticky: true });
+            m.on('click', (ev) => { window.L.DomEvent.stopPropagation(ev); if (onEntityClick) onEntityClick(e.key); });
+          } else {
+            m.setLatLng([e.lat, e.lon]);
+            if (milIcon) {
+              m.setIcon(milIcon);
+            } else if (m.setStyle) {
+              m.setStyle({ color: isSelected ? '#ffffff' : col, fillColor: col, weight: isSelected ? 3 : 1 });
+              m.setRadius(isSelected ? 10 : 6);
+            }
+          }
         }
+        if (m.getTooltip()?.getContent() !== label) m.setTooltipContent(label);
       }
 
       // Show/hide ground-truth marker based on DR mode
@@ -999,22 +1180,45 @@ const MapView = (() => {
       const drPos = (showDR || showBoth) ? computeDrPosition(e) : null;
       if (drPos && isFinite(drPos.lat) && isFinite(drPos.lon)) {
         let dm = drMarkers.get(e.key);
-        if (!dm) {
-          dm = window.L.circleMarker([drPos.lat, drPos.lon], {
-            pane: 'drPane', radius: 7, color: '#3fb950', fillColor: col,
-            fillOpacity: 0.5, weight: 2, interactive: false, opacity: 0.8,
-          }).addTo(leaflet);
+        const wantCircle = showBoth;
+        const hasCircle = dm ? !!dm.setStyle : null;
+        if (!dm || wantCircle !== hasCircle) {
+          if (dm) { leaflet.removeLayer(dm); }
+          if (wantCircle) {
+            dm = window.L.circleMarker([drPos.lat, drPos.lon], {
+              pane: 'drPane', radius: 7, color: '#3fb950', fillColor: col,
+              fillOpacity: 0.5, weight: 2, interactive: false, opacity: 0.8,
+            }).addTo(leaflet);
+          } else {
+            const drIcon = simKind ? makeSimpleMunitionIcon(col, e.heading, simKind) : makeMilIcon(e);
+            if (drIcon) {
+              dm = window.L.marker([drPos.lat, drPos.lon], {
+                icon: drIcon, pane: 'drPane', interactive: false,
+              }).addTo(leaflet);
+              dm.setOpacity(0.45);
+            } else {
+              dm = window.L.circleMarker([drPos.lat, drPos.lon], {
+                pane: 'drPane', radius: 6, color: '#3fb950', fillColor: col,
+                fillOpacity: 0.35, weight: 2, interactive: false,
+              }).addTo(leaflet);
+            }
+          }
           drMarkers.set(e.key, dm);
         } else {
           dm.setLatLng([drPos.lat, drPos.lon]);
+          if (!wantCircle && dm.setIcon) {
+            const drIcon = simKind ? makeSimpleMunitionIcon(col, e.heading, simKind) : makeMilIcon(e);
+            if (drIcon) dm.setIcon(drIcon);
+          }
         }
       } else {
         const dm = drMarkers.get(e.key);
         if (dm) { leaflet.removeLayer(dm); drMarkers.delete(e.key); }
       }
 
-      // Keep pulse ring on top of entity if it moved
-      if (isSelected && pulseRing) pulseRing.setLatLng([e.lat, e.lon]);
+      // Highlight selected entity by toggling CSS class on the marker element
+      const el = m.getElement?.();
+      if (el) el.classList.toggle('entity-selected', isSelected);
 
       // History trail
       if (showHistory) {
@@ -1082,9 +1286,14 @@ const MapView = (() => {
         leafletEl.classList.remove('hidden');
         if (!leaflet) {
           leaflet = window.L.map(leafletEl).setView([51.2, -1.8], 8);
-          window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 22, maxNativeZoom: 19, attribution: '© OpenStreetMap',
-          }).addTo(leaflet);
+          baseTileLayer = window.L.tileLayer(
+            useSatellite
+              ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+              : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            useSatellite
+              ? { maxZoom: 19, attribution: '© Esri World Imagery' }
+              : { maxZoom: 22, maxNativeZoom: 19, attribution: '© OpenStreetMap' }
+          ).addTo(leaflet);
           leaflet.on('click', () => { if (onEntityClick) onEntityClick(null); });
           leaflet.on('zoomend', () => updateLeaflet());
           leaflet.on('move', () => updateCalloutPosition());
@@ -1104,12 +1313,6 @@ const MapView = (() => {
           }
         }, 100);
         updateLeaflet();
-        // Restore pulse ring for any already-selected entity
-        if (pulseRing) { leaflet.removeLayer(pulseRing); pulseRing = null; }
-        if (selectedKey) {
-          const ent = lastEntities.find(x => x.key === selectedKey);
-          if (ent && isFinite(ent.lat) && isFinite(ent.lon)) pulseRing = makePulseRing(ent.lat, ent.lon);
-        }
         if (infoEl) infoEl.innerHTML = '<span class="map-source-pill on">online</span>';
         if (needsLoop()) ensureLoop();
       } catch (err) {
@@ -1120,7 +1323,6 @@ const MapView = (() => {
         draw();
       }
     } else {
-      if (pulseRing && leaflet) { leaflet.removeLayer(pulseRing); pulseRing = null; }
       // Save Leaflet view so we can restore it if switching back
       if (leaflet) {
         const c = leaflet.getCenter();
@@ -1164,7 +1366,140 @@ const MapView = (() => {
     if (needsLoop()) ensureLoop(); else draw();
   }
 
-  return { init, update, setTiles, resetView, setSelected, showCallout, setSymbolSize, setShowDirections, setShowDR, setFollow, setHistory, entityToSidc, entityToSidcLabel, resize: triggerResize };
+  // Resolve designation target: relative spot (entity body-frame, treated as local-tangent
+  // offset) takes priority; falls back to absolute ECEF spot location.
+  function resolveDesigTarget(desig, entMap) {
+    if (desig.spotRelIsNonZero) {
+      const ent = entMap.get(desig.designatedKey);
+      if (ent && isFinite(ent.lat) && isFinite(ent.lon)) {
+        const R = 6378137;
+        const { x, y } = desig.spotRelative; // treat x≈north, y≈east in local tangent plane
+        const dlat = x / R;
+        const dlon = y / (R * Math.cos(ent.lat * Math.PI / 180));
+        return { lat: ent.lat + dlat * 180 / Math.PI, lon: ent.lon + dlon * 180 / Math.PI };
+      }
+    }
+    if (desig.spotGeo && isFinite(desig.spotGeo.lat)) return desig.spotGeo;
+    return null;
+  }
+
+  function makeCrosshairIcon() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="-12 -12 24 24">
+      <circle r="4" fill="none" stroke="#ff3300" stroke-width="1.5"/>
+      <line x1="-11" y1="0" x2="-5" y2="0" stroke="#ff3300" stroke-width="1.5"/>
+      <line x1="5"  y1="0" x2="11" y2="0" stroke="#ff3300" stroke-width="1.5"/>
+      <line x1="0" y1="-11" x2="0" y2="-5" stroke="#ff3300" stroke-width="1.5"/>
+      <line x1="0" y1="5"  x2="0" y2="11" stroke="#ff3300" stroke-width="1.5"/>
+    </svg>`;
+    return window.L.divIcon({
+      html: `<div class="desig-crosshair">${svg}</div>`,
+      className: '',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+  }
+
+  function setDesignators(designators, entities) {
+    lastDesignators = designators || [];
+    if (!showDesignations) {
+      for (const [k, l] of desigLines) { if (useTiles && leaflet) leaflet.removeLayer(l); desigLines.delete(k); }
+      for (const [k, s] of desigSpots) { if (useTiles && leaflet) leaflet.removeLayer(s); desigSpots.delete(k); }
+      if (!useTiles && !animFrame) draw();
+      return;
+    }
+    const entMap = new Map((entities || []).map(e => [e.key, e]));
+
+    if (useTiles && leaflet) {
+      const seen = new Set();
+      for (const d of lastDesignators) {
+        const src = entMap.get(d.designatingKey);
+        if (!src || !isFinite(src.lat)) continue;
+        const tgt = resolveDesigTarget(d, entMap);
+        if (!tgt || !isFinite(tgt.lat)) continue;
+        seen.add(d._key);
+        const latlngs = [[src.lat, src.lon], [tgt.lat, tgt.lon]];
+        let line = desigLines.get(d._key);
+        if (!line) {
+          line = window.L.polyline(latlngs, {
+            color: '#ff3300', weight: 2, opacity: 0.85,
+            interactive: false, className: 'desig-line',
+          }).addTo(leaflet);
+          desigLines.set(d._key, line);
+        } else {
+          line.setLatLngs(latlngs);
+        }
+        let dot = desigSpots.get(d._key);
+        if (!dot) {
+          dot = window.L.marker([tgt.lat, tgt.lon], {
+            icon: makeCrosshairIcon(), interactive: false,
+          }).addTo(leaflet);
+          desigSpots.set(d._key, dot);
+        } else {
+          dot.setLatLng([tgt.lat, tgt.lon]);
+        }
+      }
+      for (const [k, l] of desigLines) {
+        if (!seen.has(k)) { leaflet.removeLayer(l); desigLines.delete(k); }
+      }
+      for (const [k, s] of desigSpots) {
+        if (!seen.has(k)) { leaflet.removeLayer(s); desigSpots.delete(k); }
+      }
+    } else {
+      if (!animFrame) draw();
+    }
+  }
+
+  function addDetonation(geo) {
+    if (!showDetonations) return;
+    if (!geo || !isFinite(geo.lat) || !isFinite(geo.lon)) return;
+    if (useTiles && leaflet) {
+      const icon = window.L.divIcon({
+        html: '<div class="det-ring"></div>',
+        className: '',
+        iconSize: [80, 80],
+        iconAnchor: [40, 40],
+      });
+      const m = window.L.marker([geo.lat, geo.lon], { icon, interactive: false, pane: 'markerPane' }).addTo(leaflet);
+      setTimeout(() => leaflet.removeLayer(m), 800);
+    } else {
+      detonationAnims.push({ lat: geo.lat, lon: geo.lon, startTime: performance.now() });
+      ensureLoop();
+    }
+  }
+
+  function setShowMunitions(v) {
+    showMunitions = v;
+    if (useTiles && leaflet) updateLeaflet();
+    else if (!animFrame) draw();
+  }
+  function setShowDesignations(v) {
+    showDesignations = v;
+    setDesignators(lastDesignators, lastEntities);
+  }
+  function setShowDetonations(v) { showDetonations = v; }
+
+  function setSatellite(v) {
+    useSatellite = v;
+    if (leaflet && baseTileLayer) {
+      leaflet.removeLayer(baseTileLayer);
+      baseTileLayer = window.L.tileLayer(
+        useSatellite
+          ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+          : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        useSatellite
+          ? { maxZoom: 19, attribution: '© Esri World Imagery' }
+          : { maxZoom: 22, maxNativeZoom: 19, attribution: '© OpenStreetMap' }
+      ).addTo(leaflet);
+    }
+  }
+
+  function setForceFilter(forces) {
+    forceFilter = forces;
+    if (useTiles && leaflet) updateLeaflet();
+    else if (!animFrame) draw();
+  }
+
+  return { init, update, setTiles, resetView, setSelected, showCallout, setSymbolSize, setShowDirections, setShowDR, setFollow, setHistory, setDesignators, addDetonation, setShowMunitions, setShowDesignations, setShowDetonations, setSatellite, setForceFilter, entityToSidc, entityToSidcLabel, resize: triggerResize };
 })();
 
 window.MapView = MapView;

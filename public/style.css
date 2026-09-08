@@ -229,14 +229,28 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 
 .monitor { grid-area: monitor; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .monitor > h3 { flex-shrink: 0; margin-bottom: 4px; }
-.ptabs { display: flex; gap: 0; margin: 0 -12px 0; border-bottom: 1px solid var(--line); }
+.ptabs-wrap { display: flex; align-items: stretch; margin: 0 -12px 0; border-bottom: 1px solid var(--line); }
+.ptabs {
+  display: flex; flex: 1; gap: 0;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; scroll-behavior: smooth;
+}
+.ptabs::-webkit-scrollbar { display: none; }
 .ptab {
-  flex: 1; padding: 8px 10px; background: transparent; border: none;
+  flex: 0 0 auto; white-space: nowrap;
+  padding: 8px 10px; background: transparent; border: none;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
   color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 500;
 }
 .ptab:hover { color: var(--fg); background: var(--panel2); }
 .ptab.active { color: var(--fg); background: var(--panel2); border-bottom-color: var(--accent); }
+.ptab-scroll-btn {
+  flex: 0 0 auto; padding: 0 5px; background: transparent; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1;
+  display: flex; align-items: center;
+}
+.ptab-scroll-btn:hover { color: var(--fg); }
+.ptab-scroll-btn.invisible { visibility: hidden; pointer-events: none; }
 .ptabbody { padding-top: 8px; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .ptabbody.hidden { display: none; }
 
@@ -285,18 +299,10 @@ button.active { background: var(--green); border-color: var(--green); color: #0d
 .names-table th { color: var(--muted); font-weight: normal; }
 .mil-icon { background: none !important; border: none !important; }
 
-/* Leaflet selection pulse ring — CSS animation, no JS required */
-.map-sel-pulse {
-  width: 88px; height: 88px;
-  background: rgba(255, 215, 0, 0.40);
-  border-radius: 50%;
-  animation: map-sel-pulse 1.2s ease-in-out infinite;
-  pointer-events: none;
-  position: absolute; top: 0; left: 0;
-}
-@keyframes map-sel-pulse {
-  0%, 100% { transform: scale(0.65); opacity: 1; }
-  50%       { transform: scale(1.25); opacity: 0.1; }
+/* Entity selection highlight (Leaflet marker) */
+.entity-selected {
+  filter: invert(1) brightness(1.3);
+  z-index: 1000 !important;
 }
 
 .tablewrap { flex: 1; overflow: auto; min-height: 0; }
@@ -523,6 +529,18 @@ main.map-expanded .horiz-resize-handle { display: none; }
   .details-wrap { max-height: 280px; }
 }
 
+/* Detonation ring animation (Leaflet divIcon CSS animation) */
+@keyframes det-ring-expand {
+  from { transform: scale(0); opacity: 0.65; }
+  to   { transform: scale(1); opacity: 0; }
+}
+.det-ring {
+  width: 80px; height: 80px; border-radius: 50%;
+  background: rgba(255, 80, 0, 0.5);
+  animation: det-ring-expand 700ms ease-out forwards;
+  pointer-events: none;
+}
+
 /* Audio mixer */
 .audio-device-sel { font-size: 11px; background: var(--bg); border: 1px solid var(--line); color: var(--fg); border-radius: 4px; padding: 2px 6px; flex: 1; }
 /* Gear button on audio signal rows */
@@ -545,3 +563,56 @@ main.map-expanded .horiz-resize-handle { display: none; }
 .audio-lbl { flex: 0 0 auto; font-size: 10px; color: var(--muted); min-width: 20px; text-align: center; }
 .audio-mute-btn { width: 100%; margin-top: 2px; }
 .audio-mute-btn.muted { color: var(--muted); }
+/* Set Data datum hex view */
+.datum-section { margin-top: 8px; padding: 4px 0; }
+.datum-section strong { font-size: 0.8rem; color: var(--accent, #4a9eff); display: block; margin-bottom: 4px; }
+.datum-row { margin: 4px 0; }
+.datum-id { font-size: 0.75rem; color: var(--muted, #888); display: block; }
+.datum-hex { font-size: 0.75rem; font-family: monospace; word-break: break-all; display: block; }
+.tdl-section { margin-top: 8px; }
+.tdl-section strong { font-size: 0.8rem; color: var(--accent, #4a9eff); display: block; margin-bottom: 2px; }
+.hex-dump { font-size: 0.7rem; font-family: monospace; white-space: pre; overflow-x: auto; background: var(--bg2, #1a1f2e); border-radius: 4px; padding: 6px 8px; margin-top: 4px; line-height: 1.5; }
+.hex-off  { color: var(--muted, #888); }
+.hex-data { color: var(--fg, #cdd6f4); }
+.hex-asc  { color: var(--muted2, #666); }
+
+/* --- Table sort & filter --- */
+th[data-col] { cursor: pointer; user-select: none; white-space: nowrap; }
+th[data-col]:hover { background: rgba(255,255,255,0.08); }
+th[data-col]::after { content: ' ⇅'; opacity: 0.35; font-size: 0.75em; }
+th[data-col].sort-asc::after  { content: ' ▲'; opacity: 1; }
+th[data-col].sort-desc::after { content: ' ▼'; opacity: 1; }
+.table-filter {
+  display: block; width: 100%; box-sizing: border-box;
+  margin-bottom: 4px; padding: 3px 7px;
+  background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+  color: #c9d1d9; font-size: 12px;
+}
+.table-filter:focus { outline: none; border-color: #2f81f7; }
+.table-filter::placeholder { color: #484f58; }
+
+/* --- Designator animation --- */
+@keyframes desig-march {
+  to { stroke-dashoffset: -10; } /* -(6 dash + 4 gap) = one full cycle */
+}
+.desig-line {
+  stroke-dasharray: 6 4;
+  animation: desig-march 0.4s linear infinite;
+}
+@keyframes desig-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+.desig-crosshair { animation: desig-pulse 0.7s ease-in-out infinite; }
+
+/* --- Force filter buttons --- */
+.force-filter-btns { display: flex; gap: 4px; }
+.force-btn {
+  width: 24px; height: 24px; border-radius: 4px; border: 1px solid #30363d;
+  background: #21262d; color: #8b949e; font-size: 11px; font-weight: bold;
+  cursor: pointer; padding: 0; transition: all 0.15s;
+}
+.force-btn[data-force="0"].active { background: #3a2e00; color: #c9a227; border-color: #c9a227; }
+.force-btn[data-force="1"].active { background: #0d2137; color: #4aa3ff; border-color: #4aa3ff; }
+.force-btn[data-force="2"].active { background: #2d0d0d; color: #ff5b5b; border-color: #ff5b5b; }
+.force-btn[data-force="3"].active { background: #0d2d0d; color: #4cd964; border-color: #4cd964; }

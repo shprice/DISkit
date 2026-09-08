@@ -155,22 +155,59 @@ export const BeamFunction = {
   17: 'NavigationalDirectionalBeacon',
 };
 
-// Helper: classify a frequency (Hz) into a rough radar band label.
+// Classify a frequency (Hz) into ITU, IEEE/radar, and NATO band designations.
+export function freqBandInfo(freqHz) {
+  if (!freqHz || freqHz <= 0) return { ituName: 'Unknown', ituBand: null, ieeeBand: 'Unknown', natoBand: '—' };
+  const hz = freqHz;
+  const ghz = hz / 1e9;
+
+  let ituName, ituBand;
+  if (hz < 30e3)       { ituName = 'VLF'; ituBand = 4; }
+  else if (hz < 300e3) { ituName = 'LF';  ituBand = 5; }
+  else if (hz < 3e6)   { ituName = 'MF';  ituBand = 6; }
+  else if (hz < 30e6)  { ituName = 'HF';  ituBand = 7; }
+  else if (hz < 300e6) { ituName = 'VHF'; ituBand = 8; }
+  else if (hz < 3e9)   { ituName = 'UHF'; ituBand = 9; }
+  else if (hz < 30e9)  { ituName = 'SHF'; ituBand = 10; }
+  else if (hz < 300e9) { ituName = 'EHF'; ituBand = 11; }
+  else                 { ituName = 'THF'; ituBand = 12; }
+
+  let ieeeBand;
+  if (ghz < 0.03)      ieeeBand = 'HF';
+  else if (ghz < 0.3)  ieeeBand = 'VHF';
+  else if (ghz < 1)    ieeeBand = 'UHF';
+  else if (ghz < 2)    ieeeBand = 'L';
+  else if (ghz < 4)    ieeeBand = 'S';
+  else if (ghz < 8)    ieeeBand = 'C';
+  else if (ghz < 12)   ieeeBand = 'X';
+  else if (ghz < 18)   ieeeBand = 'Ku';
+  else if (ghz < 27)   ieeeBand = 'K';
+  else if (ghz < 40)   ieeeBand = 'Ka';
+  else if (ghz < 75)   ieeeBand = 'V';
+  else                 ieeeBand = 'W';
+
+  let natoBand;
+  if (hz < 250e6)      natoBand = 'A';
+  else if (hz < 500e6) natoBand = 'B';
+  else if (hz < 1e9)   natoBand = 'C';
+  else if (hz < 2e9)   natoBand = 'D';
+  else if (hz < 3e9)   natoBand = 'E';
+  else if (hz < 4e9)   natoBand = 'F';
+  else if (hz < 6e9)   natoBand = 'G';
+  else if (hz < 8e9)   natoBand = 'H';
+  else if (hz < 10e9)  natoBand = 'I';
+  else if (hz < 20e9)  natoBand = 'J';
+  else if (hz < 40e9)  natoBand = 'K';
+  else if (hz < 60e9)  natoBand = 'L';
+  else                 natoBand = 'M';
+
+  return { ituName, ituBand, ieeeBand, natoBand };
+}
+
+// Returns the IEEE/radar letter band for a frequency in Hz (backward-compat).
 export function radarBand(freqHz) {
   if (!freqHz || freqHz <= 0) return 'Unknown';
-  const ghz = freqHz / 1e9;
-  if (ghz < 0.25) return 'HF';
-  if (ghz < 0.5) return 'VHF';
-  if (ghz < 1) return 'UHF';
-  if (ghz < 2) return 'L';
-  if (ghz < 4) return 'S';
-  if (ghz < 8) return 'C';
-  if (ghz < 12) return 'X';
-  if (ghz < 18) return 'Ku';
-  if (ghz < 27) return 'K';
-  if (ghz < 40) return 'Ka';
-  if (ghz < 75) return 'V';
-  return 'W';
+  return freqBandInfo(freqHz).ieeeBand;
 }
 
 export function pduTypeName(t) {

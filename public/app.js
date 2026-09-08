@@ -60,10 +60,12 @@ let playerState = 'idle';     // last reported replay state (playing|paused|stop
 let replayBookmarks = [];     // bookmarks of the loaded/selected replay log
 let replayDurationMs = 0;     // duration of the selected replay log
 let selectedKey = null;
-let selectedType = null;      // 'entity' | 'emitter'
+let selectedType = null;      // 'entity' | 'emitter' | 'fire' | 'detonation' | ...
 let isLocalHost = false;
 let lastStats = null;
 let lastDetailsSerial = null; // skip detail re-render when data is unchanged
+let firesRowData = new Map();  // _origIdx -> fire object snapshotted at render time
+let detsRowData = new Map();   // _origIdx -> detonation object snapshotted at render time
 const sidcSvgCache = new Map(); // SIDC string → SVG string (keyed by full 20-char SIDC)
 let entityTimeoutMs = 10000;  // from config.entityTimeoutSecs; amber at ½, red at full
 let siteNames = {};  // { "100": "Site A" }
@@ -72,7 +74,33 @@ let renderSiteAppNamesTable = null; // assigned in init(); called from handle() 
 const dataRateHistory = [];
 const pduRateHistory = [];
 const activeAudioKeys = new Map(); // key → timeout id
+let seenDetTs = null;  // null = not yet initialised (first renderStats call seeds it without animating)
+const tableState = {}; // tableId -> { sortCol: null|number, sortDir: 1|-1, filter: string }
 const RATE_HISTORY_MAX = 240;
+
+const MAP_SETTINGS_KEY = 'diskit-map-settings';
+function saveMapSettings() {
+  const s = {
+    tiles: $('mapTiles')?.checked ?? false,
+    satellite: $('mapSatellite')?.checked ?? false,
+    follow: $('mapFollow')?.checked ?? false,
+    directions: $('mapDirections')?.checked ?? false,
+    dr: $('mapDR')?.checked ?? false,
+    both: $('mapBoth')?.checked ?? false,
+    history: $('mapHistory')?.checked ?? false,
+    historyLength: +($('historyLength')?.value ?? 100),
+    historyColor: $('historyColor')?.value ?? '#f0c674',
+    symScale: +($('symScale')?.value ?? 28),
+    munitions: $('mapShowMunitions')?.checked ?? true,
+    designations: $('mapShowDesignations')?.checked ?? true,
+    detonations: $('mapShowDetonations')?.checked ?? true,
+    forceFilter: Array.from(document.querySelectorAll('.force-btn.active')).map(b => +b.dataset.force),
+  };
+  try { localStorage.setItem(MAP_SETTINGS_KEY, JSON.stringify(s)); } catch {}
+}
+function loadMapSettings() {
+  try { return JSON.parse(localStorage.getItem(MAP_SETTINGS_KEY) || 'null'); } catch { return null; }
+}
 
 function $(id) { return document.getElementById(id); }
 
@@ -390,6 +418,42 @@ function hms(ms) {
 function fmt(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
 function unCamel(s) { return s.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2'); }
 
+function getTableState(id) {
+  if (!tableState[id]) tableState[id] = { sortCol: null, sortDir: 1, filter: '' };
+  return tableState[id];
+}
+
+function applyTableState(data, cols, id) {
+  const st = getTableState(id);
+  let rows = data;
+  if (st.filter) {
+    const f = st.filter.toLowerCase();
+    rows = rows.filter(r => cols.some(a => String(a(r) ?? '').toLowerCase().includes(f)));
+  }
+  if (st.sortCol !== null && cols[st.sortCol]) {
+    const acc = cols[st.sortCol];
+    rows = [...rows].sort((a, b) => {
+      const va = acc(a), vb = acc(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return st.sortDir;
+      if (vb == null) return -st.sortDir;
+      if (typeof va === 'string') return va.localeCompare(vb) * st.sortDir;
+      return (va < vb ? -1 : va > vb ? 1 : 0) * st.sortDir;
+    });
+  }
+  return rows;
+}
+
+function updateSortIndicators(tableId) {
+  const st = getTableState(tableId);
+  const table = $(tableId);
+  if (!table) return;
+  table.querySelectorAll('th[data-col]').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (+th.dataset.col === st.sortCol) th.classList.add(st.sortDir === 1 ? 'sort-asc' : 'sort-desc');
+  });
+}
+
 function renderStats(s) {
   if (!s) return;
   $('mPdus').textContent = fmt(s.totalPdus);
@@ -414,9 +478,20 @@ function renderStats(s) {
   drawPie('sitePie', (s.sites || []).map(x => ({ count: x.count, label: `Site ${x.id}` })), 'Sites', (s.sites||[]).length);
   drawPie('appPie',  (s.apps  || []).map(x => ({ count: x.count, label: `App ${x.id}` })), 'Apps', (s.apps||[]).length);
 
+  const entityCols = [
+    e => e.marking || e.key || '',
+    e => e.force || '',
+    e => e.kind || '',
+    e => siteNames[String(e.siteId)] || String(e.siteId ?? ''),
+    e => appNames[String(e.appId)] || String(e.appId ?? ''),
+    e => e.alt ?? 0,
+    e => e.heading ?? 0,
+    e => e.speed ?? 0,
+  ];
+  const sortedEntities = applyTableState(s.entities || [], entityCols, 'entityTable');
   const eb = $('entityTable').querySelector('tbody');
   const nowMs = Date.now();
-  eb.innerHTML = s.entities.map((e) => {
+  eb.innerHTML = sortedEntities.map((e) => {
     let iconHtml;
     if (window.ms && window.MapView?.entityToSidc) {
       try {
@@ -441,8 +516,18 @@ function renderStats(s) {
     </tr>`;
   }).join('');
 
+  const emitterCols = [
+    r => r.entity || '',
+    r => String(r.emitterName ?? r.emitter ?? ''),
+    r => r.beamFunction || r['function'] || '',
+    r => r.band || '',
+    r => r.freqMHz ?? 0,
+    r => r.prf ?? 0,
+    r => r.erp ?? 0,
+  ];
+  const sortedEmitters = applyTableState(s.emitters || [], emitterCols, 'emitterTable');
   const mb = $('emitterTable').querySelector('tbody');
-  mb.innerHTML = s.emitters.map((r) => `
+  mb.innerHTML = sortedEmitters.map((r) => `
     <tr data-key="${escapeHtml(r._key || r.entity + '|' + (r.emitter || ''))}">
       <td>${escapeHtml(r.entity)}</td><td>${escapeHtml(String(r.emitterName ?? r.emitter ?? ''))}</td>
       <td>${escapeHtml(r.beamFunction || r['function'] || '')}</td>
@@ -450,17 +535,33 @@ function renderStats(s) {
     </tr>`).join('');
 
   const txb = $('txTableBody');
+  const txCols = [
+    t => t.entityKey || '',
+    t => t.radioId ?? 0,
+    t => t.txStateName || '',
+    t => t.freqMHz ?? 0,
+    t => t.band || '',
+    t => t.power ?? 0,
+  ];
   if (txb) {
-    txb.innerHTML = (s.transmitters || []).map(t => `
+    txb.innerHTML = applyTableState(s.transmitters || [], txCols, 'txTable').map(t => `
       <tr data-key="${escapeHtml(t._key)}"${t.txState === 2 ? ' class="tx-active"' : ''}>
         <td>${escapeHtml(t.entityKey)}</td><td>${t.radioId}</td>
         <td>${escapeHtml(t.txStateName)}</td><td>${ffreq(t.freqMHz)}</td>
         <td>${escapeHtml(t.band || '—')}</td><td>${t.power != null ? t.power + ' dBm' : '—'}</td>
       </tr>`).join('');
   }
+  const rxCols = [
+    r => r.entityIdKey || '',
+    r => r.radioId ?? 0,
+    r => r.receiverStateName || '',
+    r => r.receivedPower ?? 0,
+    r => r.transmitterEntityKey || '',
+    r => r.transmitterRadioId ?? 0,
+  ];
   const rxb = $('rxTableBody');
   if (rxb) {
-    rxb.innerHTML = (s.receivers || []).map(r => `
+    rxb.innerHTML = applyTableState(s.receivers || [], rxCols, 'rxTable').map(r => `
       <tr data-key="${escapeHtml(r._key)}"${r.receiverState === 2 ? ' class="rx-active"' : ''}>
         <td>${escapeHtml(r.entityIdKey)}</td><td>${r.radioId}</td>
         <td>${escapeHtml(r.receiverStateName)}</td>
@@ -469,11 +570,19 @@ function renderStats(s) {
       </tr>`).join('');
   }
 
+  const sigCols = [
+    sg => sg.entityIdKey || '',
+    sg => sg.radioId ?? 0,
+    sg => sg.encodingClassName || '',
+    sg => sg.tdlTypeName || '',
+    sg => sg.sampleRate ?? 0,
+    sg => sg.dataLengthBits ?? 0,
+  ];
   const sigb = $('sigTableBody');
   if (sigb) {
-    sigb.innerHTML = (s.signals || []).map(sg => {
+    sigb.innerHTML = applyTableState(s.signals || [], sigCols, 'sigTable').map(sg => {
       const isAudio = sg.encodingClass === 0;
-      const active = activeAudioKeys.has(sg._key);
+      const active = activeAudioKeys.has(sg._key) || (sg.lastSeen && Date.now() - sg.lastSeen < 2500);
       const gearCell = isAudio
         ? `<td><button class="audio-gear-btn mini" data-key="${escapeHtml(sg._key)}" title="Audio settings">⚙</button></td>`
         : '<td></td>';
@@ -481,14 +590,23 @@ function renderStats(s) {
         <td>${escapeHtml(sg.entityIdKey)}</td><td>${sg.radioId}</td>
         <td>${escapeHtml(sg.encodingClassName || '—')}</td>
         <td>${escapeHtml(sg.tdlTypeName || '—')}</td>
-        <td>${frate(sg.sampleRate)}</td><td>${sg.dataLengthBits || 0}</td>${gearCell}
+        <td>${frate(sg.sampleRate)}</td><td>${sg.dataLengthBits || 0} bits</td>${gearCell}
       </tr>`;
     }).join('');
   }
 
+  const icCtrlCols = [
+    ic => ic.sourceEntityKey || '',
+    ic => ic.sourceDeviceId ?? 0,
+    ic => ic.sourceLineId ?? 0,
+    ic => ic.transmitLineState ?? 0,
+    ic => ic.controlTypeName || '',
+    ic => ic.commandName || '',
+    ic => ic.transmitPriority ?? 0,
+  ];
   const icctrlb = $('icCtrlTableBody');
   if (icctrlb) {
-    icctrlb.innerHTML = (s.intercomControls || []).map(ic => `
+    icctrlb.innerHTML = applyTableState(s.intercomControls || [], icCtrlCols, 'icCtrlTable').map(ic => `
       <tr data-key="${escapeHtml(ic._key)}"${ic.transmitLineState === 1 ? ' class="ic-ctrl-active"' : ''}>
         <td>${escapeHtml(ic.sourceEntityKey)}</td><td>${ic.sourceDeviceId}</td>
         <td>${ic.sourceLineId}</td>
@@ -497,11 +615,19 @@ function renderStats(s) {
         <td>${ic.transmitPriority}</td>
       </tr>`).join('');
   }
+  const icSigCols = [
+    ic => ic.entityIdKey || '',
+    ic => ic.deviceId ?? 0,
+    ic => ic.encodingClassName || '',
+    ic => ic.tdlTypeName || '',
+    ic => ic.sampleRate ?? 0,
+    ic => ic.dataLengthBits ?? 0,
+  ];
   const icsigb = $('icSigTableBody');
   if (icsigb) {
-    icsigb.innerHTML = (s.intercomSignals || []).map(ic => {
+    icsigb.innerHTML = applyTableState(s.intercomSignals || [], icSigCols, 'icSigTable').map(ic => {
       const isAudio = ic.encodingClass === 0;
-      const active  = activeAudioKeys.has(ic._key);
+      const active  = activeAudioKeys.has(ic._key) || (ic.lastSeen && Date.now() - ic.lastSeen < 2500);
       const gearCell = isAudio
         ? `<td><button class="audio-gear-btn mini" data-key="${escapeHtml(ic._key)}" title="Audio settings">⚙</button></td>`
         : '<td></td>';
@@ -509,30 +635,106 @@ function renderStats(s) {
         <td>${escapeHtml(ic.entityIdKey)}</td><td>${ic.deviceId}</td>
         <td>${escapeHtml(ic.encodingClassName || '—')}</td>
         <td>${escapeHtml(ic.tdlTypeName || '—')}</td>
-        <td>${frate(ic.sampleRate)}</td><td>${ic.dataLengthBits || 0}</td>${gearCell}
+        <td>${frate(ic.sampleRate)}</td><td>${ic.dataLengthBits || 0} bits</td>${gearCell}
       </tr>`;
     }).join('');
   }
 
+  const setDataCols = [
+    sd => sd.originatingEntityKey || '',
+    sd => sd.receivingEntityKey || '',
+    sd => sd.requestId ?? 0,
+    sd => sd.numFixedDatums ?? 0,
+    sd => sd.numVariableDatums ?? 0,
+  ];
+  const sdtb = $('setDataTableBody');
+  if (sdtb) {
+    sdtb.innerHTML = applyTableState(s.setData || [], setDataCols, 'setDataTable').map(sd => `
+      <tr data-key="${escapeHtml(sd._key)}">
+        <td>${escapeHtml(sd.originatingEntityKey)}</td>
+        <td>${escapeHtml(sd.receivingEntityKey)}</td>
+        <td>${sd.requestId}</td>
+        <td>${sd.numFixedDatums}</td>
+        <td>${sd.numVariableDatums}</td>
+      </tr>`).join('');
+  }
+
+  const desigCols = [
+    d => d.designatingKey || '',
+    d => d.designatedKey || '',
+    d => d.code ?? 0,
+    d => d.power ?? 0,
+    d => d.wavelengthNm ?? 0,
+  ];
+  const desigb = $('desigTableBody');
+  if (desigb) {
+    desigb.innerHTML = applyTableState(s.designators || [], desigCols, 'desigTable').map(d => `
+      <tr data-key="${escapeHtml(d._key)}">
+        <td>${escapeHtml(d.designatingKey)}</td>
+        <td>${escapeHtml(d.designatedKey || '—')}</td>
+        <td>${d.code ?? '—'}</td>
+        <td>${d.power != null ? d.power : '—'}</td>
+        <td>${d.wavelengthNm != null ? d.wavelengthNm + ' nm' : '—'}</td>
+      </tr>`).join('');
+  }
+
+  const firesCols = [
+    f => f.ts ?? 0,
+    f => f.firingKey || '',
+    f => f.targetKey || '',
+    f => f.munitionType || '',
+    f => f.range ?? 0,
+  ];
   const fb = $('firesTableBody');
   if (fb) {
-    fb.innerHTML = (s.fires || []).map((f, i) => `
-      <tr data-key="${i}">
+    const indexedFires = (s.fires || []).map((f, i) => ({ ...f, _origIdx: i }));
+    firesRowData = new Map(indexedFires.map(f => [f._origIdx, f]));
+    const sortedFires = applyTableState(indexedFires, firesCols, 'firesTable');
+    fb.innerHTML = sortedFires.map((f) => `
+      <tr data-key="${f._origIdx}">
         <td>${ts2(f.ts)}</td><td>${escapeHtml(f.firingKey)}</td>
         <td>${escapeHtml(f.targetKey || '—')}</td>
         <td>${escapeHtml(f.munitionType || '—')}</td>
         <td>${f.range != null ? fnum(f.range, 0) + ' m' : '—'}</td>
       </tr>`).join('');
   }
+  const detsCols = [
+    d => d.ts ?? 0,
+    d => d.firingKey || '',
+    d => d.targetKey || '',
+    d => d.munitionType || '',
+    d => d.result || '',
+  ];
   const db = $('detsTableBody');
   if (db) {
-    db.innerHTML = (s.detonations || []).map((d, i) => `
-      <tr data-key="${i}">
+    const indexedDets = (s.detonations || []).map((d, i) => ({ ...d, _origIdx: i }));
+    detsRowData = new Map(indexedDets.map(d => [d._origIdx, d]));
+    const sortedDets = applyTableState(indexedDets, detsCols, 'detsTable');
+    db.innerHTML = sortedDets.map((d) => `
+      <tr data-key="${d._origIdx}">
         <td>${ts2(d.ts)}</td><td>${escapeHtml(d.firingKey)}</td>
         <td>${escapeHtml(d.targetKey || '—')}</td>
         <td>${escapeHtml(d.munitionType || '—')}</td>
         <td>${escapeHtml(d.result || '—')}</td>
       </tr>`).join('');
+  }
+
+  // Animate new detonations; seed set on first call so existing dets don't fire
+  const dets = s.detonations || [];
+  if (seenDetTs === null) {
+    seenDetTs = new Set(dets.map(d => d.ts));
+  } else {
+    for (const d of dets) {
+      if (!seenDetTs.has(d.ts)) {
+        seenDetTs.add(d.ts);
+        if (d.geo && window.MapView?.addDetonation) window.MapView.addDetonation(d.geo);
+      }
+    }
+    // trim to avoid unbounded growth (keep last 500 timestamps)
+    if (seenDetTs.size > 500) {
+      const arr = Array.from(seenDetTs);
+      seenDetTs = new Set(arr.slice(arr.length - 500));
+    }
   }
 
   // Persist selection highlight across re-renders; refresh details if data changed
@@ -543,9 +745,11 @@ function renderStats(s) {
     const tx     = selectedType === 'transmitter' ? s.transmitters?.find(x => x._key === selectedKey)      : null;
     const rx     = selectedType === 'receiver'    ? s.receivers?.find(x => x._key === selectedKey)         : null;
     const sig    = selectedType === 'signal'      ? s.signals?.find(x => x._key === selectedKey)           : null;
-    const icCtrl = selectedType === 'ic-control'  ? s.intercomControls?.find(x => x._key === selectedKey)  : null;
-    const icSig  = selectedType === 'ic-signal'   ? s.intercomSignals?.find(x => x._key === selectedKey)   : null;
-    const fresh = ent || emit || tx || rx || sig || icCtrl || icSig;
+    const icCtrl  = selectedType === 'ic-control'  ? s.intercomControls?.find(x => x._key === selectedKey)  : null;
+    const icSig   = selectedType === 'ic-signal'   ? s.intercomSignals?.find(x => x._key === selectedKey)   : null;
+    const setDatum  = selectedType === 'set-data'   ? s.setData?.find(x => x._key === selectedKey)            : null;
+    const desig     = selectedType === 'designator' ? s.designators?.find(x => x._key === selectedKey)        : null;
+    const fresh = ent || emit || tx || rx || sig || icCtrl || icSig || setDatum || desig;
     if (fresh) {
       renderDetails(fresh);
       if (selectedType === 'entity') window.MapView.showCallout(buildMapCallout(ent));
@@ -556,6 +760,7 @@ function renderStats(s) {
   applyTableSelection();
 
   window.MapView.update(s.entities);
+  window.MapView.setDesignators(s.designators || [], s.entities || []);
 }
 function fnum(v, d) { return (v === undefined || v === null || !isFinite(v)) ? '' : Number(v).toFixed(d); }
 
@@ -632,11 +837,22 @@ function applyTableSelection() {
   tbl('sigTable', 'signal');
   tbl('icCtrlTable', 'ic-control');
   tbl('icSigTable', 'ic-signal');
+  tbl('setDataTable', 'set-data');
+  tbl('desigTable', 'designator');
   // fires/detonations use index as key
   document.querySelectorAll('#firesTable tbody tr').forEach(r =>
     r.classList.toggle('selected', selectedType === 'fire' && selectedKey === `fire_${r.dataset.key}`));
   document.querySelectorAll('#detsTable tbody tr').forEach(r =>
     r.classList.toggle('selected', selectedType === 'detonation' && selectedKey === `det_${r.dataset.key}`));
+
+  // Auto-scroll entity table to selected row when Entities tab is active
+  if (selectedType === 'entity' && selectedKey) {
+    const activeTab = document.querySelector('.ptab.active')?.dataset?.ptab;
+    if (activeTab === 'entities') {
+      const row = document.querySelector(`#entityTable tr[data-key="${CSS.escape(selectedKey)}"]`);
+      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
 }
 
 function decodeAppearance(app, kind, domain) {
@@ -752,6 +968,95 @@ function showAudioPopup(key, anchorEl) {
     sel.innerHTML = devs.map(d => `<option value="${escapeHtml(d.deviceId)}"${d.deviceId === cur ? ' selected' : ''}>${escapeHtml(d.label || 'Device ' + d.deviceId.slice(0,8))}</option>`).join('');
     row.classList.remove('hidden');
   });
+}
+
+// ── TDL signal data display ──────────────────────────────────────────────────
+
+function hexBytes(arr) {
+  if (!arr || !arr.length) return '';
+  const bytes = Array.isArray(arr) ? arr : Array.from(Object.values(arr));
+  return bytes.map(b => (b & 0xFF).toString(16).padStart(2, '0').toUpperCase()).join(' ');
+}
+
+function hexLine(arr, rowBytes = 16) {
+  const bytes = Array.isArray(arr) ? arr : Array.from(Object.values(arr || {}));
+  if (!bytes.length) return '<em>(empty)</em>';
+  const rows = [];
+  for (let i = 0; i < bytes.length; i += rowBytes) {
+    const chunk = bytes.slice(i, i + rowBytes);
+    const hex  = chunk.map(b => (b & 0xFF).toString(16).padStart(2, '0').toUpperCase()).join(' ');
+    const asc  = chunk.map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
+    rows.push(`<span class="hex-off">${i.toString(16).padStart(4,'0')} </span><span class="hex-data">${hex.padEnd(rowBytes*3-1,' ')}</span>  <span class="hex-asc">${escapeHtml(asc)}</span>`);
+  }
+  return rows.join('\n');
+}
+
+function renderTdlDetails(tdlType, tdlData, signalBytes) {
+  const parts = [];
+
+  if (tdlData) {
+    if (tdlType === 8 || tdlType === 100) {
+      // Link-16 (JTIDS/MIDS/TADIL-J) — type 8 standard, type 100 sim alias
+      parts.push(`<div class="tdl-section">
+        <strong>Link-16 Header</strong>
+        <dl class="detail-list">
+          ${tdlData.epochNumber      != null ? `<dt>Epoch number</dt><dd>${tdlData.epochNumber}</dd>` : ''}
+          ${tdlData.timeSlotNumber   != null ? `<dt>Time slot number</dt><dd>${tdlData.timeSlotNumber}</dd>` : ''}
+          ${tdlData.netNumber        != null ? `<dt>Net number</dt><dd>${tdlData.netNumber}</dd>` : ''}
+          ${tdlData.npgNumber        != null ? `<dt>NPG number</dt><dd>${tdlData.npgNumber}</dd>` : ''}
+          ${tdlData.ntpTimestamp               ? `<dt>NTP timestamp</dt><dd>${escapeHtml(tdlData.ntpTimestamp)}</dd>` : ''}
+          ${tdlData.ntpSeconds       != null ? `<dt>NTP seconds</dt><dd>${tdlData.ntpSeconds}</dd>` : ''}
+          ${tdlData.messageSecurityId != null ? `<dt>Message security ID</dt><dd>${tdlData.messageSecurityId}</dd>` : ''}
+          ${tdlData.transSecurityId  != null ? `<dt>Trans security ID</dt><dd>${tdlData.transSecurityId}</dd>` : ''}
+          ${tdlData.numJWords        != null ? `<dt>Number of J-words</dt><dd>${tdlData.numJWords}</dd>` : ''}
+          ${tdlData.messageTypeName            ? `<dt>Message type</dt><dd>${escapeHtml(tdlData.messageTypeName)}${tdlData.jSeriesName ? ` — ${escapeHtml(tdlData.jSeriesName)}` : ''}</dd>` : ''}
+        </dl>
+      </div>`);
+      if (tdlData.jWords && tdlData.jWords.length) {
+        const wordRows = tdlData.jWords.map((w, i) =>
+          `<div class="datum-row"><span class="datum-id">J-word ${i}</span><code class="datum-hex">${hexBytes(w)}</code></div>`
+        ).join('');
+        parts.push(`<div class="datum-section"><strong>J-Words (${tdlData.jWords.length})</strong>${wordRows}</div>`);
+      }
+    } else if (tdlType === 5 || tdlType === 7) {
+      // Link-11A / Link-11B
+      parts.push(`<div class="tdl-section">
+        <strong>Link-11 Header</strong>
+        <dl class="detail-list">
+          ${tdlData.networkUnitId    != null ? `<dt>Network unit ID</dt><dd>${tdlData.networkUnitId}</dd>` : ''}
+          ${tdlData.messageIndicator != null ? `<dt>Message indicator</dt><dd>${tdlData.messageIndicator}</dd>` : ''}
+          ${tdlData.frameCount       != null ? `<dt>Frame count</dt><dd>${tdlData.frameCount}</dd>` : ''}
+          ${tdlData.frameWordCount   != null ? `<dt>Frame words</dt><dd>${tdlData.frameWordCount}</dd>` : ''}
+        </dl>
+      </div>`);
+      if (tdlData.frameWords && tdlData.frameWords.length) {
+        const wRows = tdlData.frameWords.map((w, i) =>
+          `<div class="datum-row"><span class="datum-id">Word ${i}</span><code class="datum-hex">${hexBytes(w)}</code></div>`
+        ).join('');
+        parts.push(`<div class="datum-section"><strong>Frame Words</strong>${wRows}</div>`);
+      }
+    } else if (tdlType === 6) {
+      // SADL
+      parts.push(`<div class="tdl-section">
+        <strong>SADL Header</strong>
+        <dl class="detail-list">
+          ${tdlData.frameNumber   != null ? `<dt>Frame number</dt><dd>${tdlData.frameNumber}</dd>` : ''}
+          ${tdlData.messageTypeName         ? `<dt>Message type</dt><dd>${escapeHtml(tdlData.messageTypeName)}</dd>` : ''}
+          ${tdlData.netNumber     != null ? `<dt>Net number</dt><dd>${tdlData.netNumber}</dd>` : ''}
+          ${tdlData.wordCount     != null ? `<dt>Word count</dt><dd>${tdlData.wordCount}</dd>` : ''}
+        </dl>
+      </div>`);
+    } else if (tdlData.byteCount != null) {
+      parts.push(`<div class="tdl-section"><strong>TDL Data</strong><dl class="detail-list"><dt>Byte count</dt><dd>${tdlData.byteCount}</dd></dl></div>`);
+    }
+  }
+
+  if (signalBytes && signalBytes.length) {
+    const truncated = signalBytes.length >= 512 ? ' (first 512 B)' : '';
+    parts.push(`<div class="datum-section"><strong>Signal Data${escapeHtml(truncated)}</strong><pre class="hex-dump">${hexLine(signalBytes)}</pre></div>`);
+  }
+
+  return parts.join('');
 }
 
 function renderDetails(data) {
@@ -950,15 +1255,34 @@ function renderDetails(data) {
   } else if (selectedType === 'transmitter') {
     const t = data;
     const ls = t.lastSeen ? new Date(t.lastSeen).toTimeString().slice(0,8) : '—';
+    const bi = t.bandInfo || {};
+    const powerW = (t.power != null && isFinite(t.power)) ? Math.pow(10, (t.power - 30) / 10) : null;
+    const powerWStr = powerW != null ? (powerW >= 1 ? powerW.toFixed(3) + ' W' : (powerW * 1000).toFixed(3) + ' mW') : '—';
+    const modSection = (t.majorModulationName || t.radioSystemName) ? `
+      <dt class="detail-subsection">Modulation</dt>
+      ${t.radioSystemName ? `<dt>Radio system</dt><dd>${escapeHtml(t.radioSystemName)}</dd>` : ''}
+      ${t.majorModulationName ? `<dt>Major modulation</dt><dd>${escapeHtml(t.majorModulationName)}</dd>` : ''}
+      ${t.spreadSpectrum ? `<dt>Spread spectrum</dt><dd>${t.spreadSpectrum}</dd>` : ''}
+      ${t.cryptoSystem ? `<dt>Crypto system</dt><dd>${escapeHtml(t.cryptoSystemName || String(t.cryptoSystem))}</dd>` : ''}
+      ${t.cryptoKeyId ? `<dt>Crypto key ID</dt><dd>${t.cryptoKeyId}</dd>` : ''}
+      ${t.modParamLength ? `<dt>Mod param length</dt><dd>${t.modParamLength} bytes</dd>` : ''}
+    ` : '';
     el.innerHTML = `<dl class="detail-list">
       <dt class="detail-section">Transmitter</dt>
-      <dt>Entity</dt><dd>${escapeHtml(t.entityKey||'—')}</dd>
+      <dt>Host entity</dt><dd>${escapeHtml(t.entityKey||'—')}</dd>
       <dt>Radio ID</dt><dd>${t.radioId}</dd>
-      <dt>Tx State</dt><dd>${escapeHtml(t.txStateName||'—')}</dd>
+      <dt>Tx state</dt><dd>${escapeHtml(t.txStateName||'—')}</dd>
       <dt>Frequency</dt><dd>${t.freqMHz} MHz</dd>
-      <dt>Band</dt><dd>${escapeHtml(t.band||'—')}</dd>
-      <dt>Power</dt><dd>${t.power} dBm</dd>
+      <dt class="detail-subsection">Band</dt>
+      <dt>ITU designation</dt><dd>${escapeHtml(bi.ituName||'—')} (band ${bi.ituBand ?? '—'})</dd>
+      <dt>IEEE/Radar band</dt><dd>${escapeHtml(bi.ieeeBand||'—')}</dd>
+      <dt>NATO band</dt><dd>${escapeHtml(bi.natoBand||'—')}</dd>
+      <dt class="detail-subsection">Power</dt>
+      <dt>Power (dBm)</dt><dd>${t.power} dBm</dd>
+      <dt>Power (linear)</dt><dd>${powerWStr}</dd>
+      ${modSection}
       ${t.geo ? `
+      <dt class="detail-subsection">Location</dt>
       <dt>Lat</dt><dd>${fnum(t.geo.lat,6)}</dd>
       <dt>Lon</dt><dd>${fnum(t.geo.lon,6)}</dd>
       <dt>Alt</dt><dd>${fnum(t.geo.alt,0)} m</dd>` : ''}
@@ -994,7 +1318,8 @@ function renderDetails(data) {
       <dt>Data length</dt><dd>${sg.dataLengthBits||0} bits</dd>
       <dt>Samples</dt><dd>${sg.numSamples||0}</dd>
       <dt>Last seen</dt><dd>${ls}</dd>
-    </dl>`;
+    </dl>
+    ${renderTdlDetails(sg.tdlType, sg.tdlData, sg.signalBytes)}`;
 
   } else if (selectedType === 'ic-control') {
     const ic = data;
@@ -1035,6 +1360,60 @@ function renderDetails(data) {
       <dt>Sample rate</dt><dd>${ic.sampleRate||0} Hz</dd>
       <dt>Data length</dt><dd>${ic.dataLengthBits||0} bits</dd>
       <dt>Samples</dt><dd>${ic.numSamples||0}</dd>
+      <dt>Last seen</dt><dd>${ls}</dd>
+    </dl>`;
+
+  } else if (selectedType === 'set-data') {
+    const sd = data;
+    const ls = sd.lastSeen ? new Date(sd.lastSeen).toTimeString().slice(0,8) : '—';
+    const toHex = (val) => {
+      const bytes = Array.isArray(val) ? val : (val?.data ? val.data : Object.values(val || {}));
+      if (!bytes || !bytes.length) return '(empty)';
+      return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+    };
+    const fixedRows = (sd.fixedDatums || []).map(d =>
+      `<div class="datum-row"><span class="datum-id">ID 0x${d.datumId.toString(16).toUpperCase().padStart(8,'0')}</span><code class="datum-hex">${toHex(d.value)}</code></div>`
+    ).join('');
+    const varRows = (sd.variableDatums || []).map(d =>
+      `<div class="datum-row"><span class="datum-id">ID 0x${d.datumId.toString(16).toUpperCase().padStart(8,'0')} (${d.lengthBits} bits)</span><code class="datum-hex">${toHex(d.value)}</code></div>`
+    ).join('');
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Set Data</dt>
+      <dt>Originating entity</dt><dd>${escapeHtml(sd.originatingEntityKey||'—')}</dd>
+      <dt>Receiving entity</dt><dd>${escapeHtml(sd.receivingEntityKey||'—')}</dd>
+      <dt>Request ID</dt><dd>${sd.requestId ?? '—'}</dd>
+      <dt>Fixed datums</dt><dd>${sd.numFixedDatums}</dd>
+      <dt>Variable datums</dt><dd>${sd.numVariableDatums}</dd>
+      <dt>Last seen</dt><dd>${ls}</dd>
+    </dl>
+    ${sd.numFixedDatums > 0 ? `<div class="datum-section"><strong>Fixed Datums</strong>${fixedRows}</div>` : ''}
+    ${sd.numVariableDatums > 0 ? `<div class="datum-section"><strong>Variable Datums</strong>${varRows}</div>` : ''}`;
+
+  } else if (selectedType === 'designator') {
+    const d = data;
+    const ls = d.lastSeen ? new Date(d.lastSeen).toTimeString().slice(0,8) : '—';
+    const hasSpot = d.spotGeo && isFinite(d.spotGeo.lat);
+    el.innerHTML = `<dl class="detail-list">
+      <dt class="detail-section">Designator</dt>
+      <dt>Designating entity</dt><dd>${escapeHtml(d.designatingKey||'—')}</dd>
+      <dt>Designated entity</dt><dd>${escapeHtml(d.designatedKey||'—')}</dd>
+      <dt>Code name</dt><dd>${escapeHtml(d.codeNameStr||'—')} (${d.codeName ?? '—'})</dd>
+      <dt>Designator code</dt><dd>${d.code ?? '—'}</dd>
+      <dt>Power</dt><dd>${d.power != null ? d.power + ' W' : '—'}</dd>
+      <dt>Wavelength</dt><dd>${d.wavelengthMicrons != null ? d.wavelengthMicrons + ' μm (' + d.wavelengthNm + ' nm)' : '—'}</dd>
+      <dt class="detail-subsection">Spot (relative to designated entity)</dt>
+      <dt>X</dt><dd>${d.spotRelative?.x != null ? d.spotRelative.x + ' m' : '—'}</dd>
+      <dt>Y</dt><dd>${d.spotRelative?.y != null ? d.spotRelative.y + ' m' : '—'}</dd>
+      <dt>Z</dt><dd>${d.spotRelative?.z != null ? d.spotRelative.z + ' m' : '—'}</dd>
+      ${d.spotRelIsNonZero ? '<dt class="detail-subsection">Map source</dt><dd>Relative spot (priority)</dd>' : ''}
+      <dt class="detail-subsection">Spot location (absolute)</dt>
+      <dt>Latitude</dt><dd>${hasSpot ? d.spotGeo.lat.toFixed(6) + '°' : '—'}</dd>
+      <dt>Longitude</dt><dd>${hasSpot ? d.spotGeo.lon.toFixed(6) + '°' : '—'}</dd>
+      <dt>Altitude</dt><dd>${hasSpot && d.spotGeo.alt != null ? fnum(d.spotGeo.alt, 1) + ' m' : '—'}</dd>
+      <dt class="detail-subsection">Dead Reckoning</dt>
+      <dt>DR algorithm</dt><dd>${d.drAlgorithm ?? '—'}</dd>
+      <dt>Velocity (m/s)</dt><dd>X ${d.velocity?.x ?? '—'} Y ${d.velocity?.y ?? '—'} Z ${d.velocity?.z ?? '—'}</dd>
+      <dt>Acceleration (m/s²)</dt><dd>X ${d.acceleration?.x ?? '—'} Y ${d.acceleration?.y ?? '—'} Z ${d.acceleration?.z ?? '—'}</dd>
       <dt>Last seen</dt><dd>${ls}</dd>
     </dl>`;
   }
@@ -1444,29 +1823,90 @@ function init() {
     const next = !$('mapTiles').checked;
     $('mapTiles').checked = next;
     window.MapView.setTiles(next, $('mapInfo'));
+    saveMapSettings();
   });
-  $('mapTiles').onchange = () => window.MapView.setTiles($('mapTiles').checked, $('mapInfo'));
-  $('mapFollow').onchange = () => window.MapView.setFollow($('mapFollow').checked);
-  $('mapDirections').onchange = () => window.MapView.setShowDirections($('mapDirections').checked);
+  $('mapTiles').onchange = () => { window.MapView.setTiles($('mapTiles').checked, $('mapInfo')); saveMapSettings(); };
+  $('mapFollow').onchange = () => { window.MapView.setFollow($('mapFollow').checked); saveMapSettings(); };
+  $('mapDirections').onchange = () => { window.MapView.setShowDirections($('mapDirections').checked); saveMapSettings(); };
   $('mapDR').onchange = () => {
     const on = $('mapDR').checked;
     $('mapBoth').disabled = !on;
     if (!on) $('mapBoth').checked = false;
     window.MapView.setShowDR(on, $('mapBoth').checked);
+    saveMapSettings();
   };
-  $('mapBoth').onchange = () => window.MapView.setShowDR($('mapDR').checked, $('mapBoth').checked);
+  $('mapBoth').onchange = () => { window.MapView.setShowDR($('mapDR').checked, $('mapBoth').checked); saveMapSettings(); };
   $('mapBoth').disabled = true;
-  $('symScale').addEventListener('input', () => window.MapView.setSymbolSize(+$('symScale').value));
+  $('symScale').addEventListener('input', () => { window.MapView.setSymbolSize(+$('symScale').value); saveMapSettings(); });
   $('mapHistory').onchange = () => {
     const on = $('mapHistory').checked;
     $('historyLengthRow').style.display = on ? '' : 'none';
     $('historyColorRow').style.display = on ? '' : 'none';
     window.MapView.setHistory(on, +$('historyLength').value, $('historyColor').value);
+    saveMapSettings();
   };
-  $('historyLength').addEventListener('input', () =>
-    window.MapView.setHistory($('mapHistory').checked, +$('historyLength').value, $('historyColor').value));
-  $('historyColor').addEventListener('input', () =>
-    window.MapView.setHistory($('mapHistory').checked, +$('historyLength').value, $('historyColor').value));
+  $('historyLength').addEventListener('input', () => {
+    window.MapView.setHistory($('mapHistory').checked, +$('historyLength').value, $('historyColor').value);
+    saveMapSettings();
+  });
+  $('historyColor').addEventListener('input', () => {
+    window.MapView.setHistory($('mapHistory').checked, +$('historyLength').value, $('historyColor').value);
+    saveMapSettings();
+  });
+  $('mapShowMunitions').onchange = () => { window.MapView.setShowMunitions($('mapShowMunitions').checked); saveMapSettings(); };
+  $('mapShowDesignations').onchange = () => { window.MapView.setShowDesignations($('mapShowDesignations').checked); saveMapSettings(); };
+  $('mapShowDetonations').onchange = () => { window.MapView.setShowDetonations($('mapShowDetonations').checked); saveMapSettings(); };
+  $('mapSatellite').onchange = () => { window.MapView.setSatellite($('mapSatellite').checked); saveMapSettings(); };
+  // Force filter buttons
+  document.querySelectorAll('.force-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.classList.toggle('active');
+      const active = Array.from(document.querySelectorAll('.force-btn.active')).map(b => +b.dataset.force);
+      window.MapView.setForceFilter(active.length < 4 ? new Set(active) : null);
+      saveMapSettings();
+    });
+  });
+  // Restore persisted map settings
+  const ms = loadMapSettings();
+  if (ms) {
+    if (ms.follow !== undefined)      { $('mapFollow').checked = ms.follow; window.MapView.setFollow(ms.follow); }
+    if (ms.directions !== undefined)  { $('mapDirections').checked = ms.directions; window.MapView.setShowDirections(ms.directions); }
+    if (ms.symScale !== undefined)    { $('symScale').value = ms.symScale; window.MapView.setSymbolSize(ms.symScale); }
+    if (ms.munitions !== undefined)   { $('mapShowMunitions').checked = ms.munitions; window.MapView.setShowMunitions(ms.munitions); }
+    if (ms.designations !== undefined){ $('mapShowDesignations').checked = ms.designations; window.MapView.setShowDesignations(ms.designations); }
+    if (ms.detonations !== undefined) { $('mapShowDetonations').checked = ms.detonations; window.MapView.setShowDetonations(ms.detonations); }
+    if (ms.historyColor !== undefined){ $('historyColor').value = ms.historyColor; }
+    if (ms.historyLength !== undefined){ $('historyLength').value = ms.historyLength; }
+    if (ms.history !== undefined && ms.history) {
+      $('mapHistory').checked = true;
+      $('historyLengthRow').style.display = '';
+      $('historyColorRow').style.display = '';
+      window.MapView.setHistory(true, ms.historyLength ?? 100, ms.historyColor ?? '#f0c674');
+    }
+    if (ms.dr !== undefined && ms.dr) {
+      $('mapDR').checked = true;
+      $('mapBoth').disabled = false;
+      if (ms.both) { $('mapBoth').checked = true; }
+      window.MapView.setShowDR(ms.dr, ms.both ?? false);
+    }
+    if (ms.forceFilter !== undefined && ms.forceFilter.length < 4) {
+      document.querySelectorAll('.force-btn').forEach(b => {
+        const active = ms.forceFilter.includes(+b.dataset.force);
+        b.classList.toggle('active', active);
+      });
+      window.MapView.setForceFilter(new Set(ms.forceFilter));
+    }
+    if (ms.satellite !== undefined && ms.satellite) {
+      $('mapSatellite').checked = true;
+      window.MapView.setSatellite(true);
+    }
+    // Tiles last (async, triggers map init)
+    if (ms.tiles !== undefined && ms.tiles) {
+      $('mapTiles').checked = true;
+      window.MapView.setTiles(true, $('mapInfo'));
+    }
+  }
+
   $('mapReset').onclick = () => window.MapView.resetView();
   $('mapExpand').onclick = () => {
     const main = document.querySelector('main');
@@ -1503,15 +1943,21 @@ function init() {
     const tr = e.target.closest('tr[data-key]');
     if (!tr) return;
     const idx = +tr.dataset.key;
-    const f = lastStats?.fires?.[idx];
-    if (f != null) { selectedKey = `fire_${idx}`; selectedType = 'fire'; renderDetails(f); applyTableSelection(); }
+    const f = firesRowData.get(idx);
+    if (f == null) return;
+    lastDetailsSerial = null;
+    selectedKey = `fire_${idx}`; selectedType = 'fire';
+    renderDetails(f); applyTableSelection();
   });
   $('detsTable')?.addEventListener('click', e => {
     const tr = e.target.closest('tr[data-key]');
     if (!tr) return;
     const idx = +tr.dataset.key;
-    const d = lastStats?.detonations?.[idx];
-    if (d != null) { selectedKey = `det_${idx}`; selectedType = 'detonation'; renderDetails(d); applyTableSelection(); }
+    const d = detsRowData.get(idx);
+    if (d == null) return;
+    lastDetailsSerial = null;
+    selectedKey = `det_${idx}`; selectedType = 'detonation';
+    renderDetails(d); applyTableSelection();
   });
   $('txTable')?.addEventListener('click', e => {
     const tr = e.target.closest('tr[data-key]');
@@ -1549,13 +1995,70 @@ function init() {
     const btn = e.target.closest('.audio-gear-btn');
     if (btn) { e.stopPropagation(); showAudioPopup(btn.dataset.key, btn); }
   });
+  $('setDataTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const sd = lastStats?.setData?.find(x => x._key === tr.dataset.key);
+    if (sd) selectItem(tr.dataset.key, 'set-data', sd);
+  });
+  $('desigTable')?.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    const d = lastStats?.designators?.find(x => x._key === tr.dataset.key);
+    if (d) selectItem(tr.dataset.key, 'designator', d);
+  });
+  // Setup sortable columns and filter inputs for all monitor tables
+  document.querySelectorAll('table[id] thead th[data-col]').forEach(th => {
+    const tableId = th.closest('table').id;
+    th.addEventListener('click', () => {
+      const col = +th.dataset.col;
+      const st = getTableState(tableId);
+      if (st.sortCol === col) { st.sortDir *= -1; }
+      else { st.sortCol = col; st.sortDir = 1; }
+      updateSortIndicators(tableId);
+      if (lastStats) renderStats(lastStats);
+    });
+  });
+  document.querySelectorAll('table[id]').forEach(table => {
+    const wrap = table.closest('.tablewrap');
+    if (!wrap) return;
+    const tableId = table.id;
+    const inp = document.createElement('input');
+    inp.type = 'search';
+    inp.className = 'table-filter';
+    inp.placeholder = 'Filter…';
+    inp.addEventListener('input', () => {
+      getTableState(tableId).filter = inp.value.trim();
+      if (lastStats) renderStats(lastStats);
+    });
+    wrap.insertBefore(inp, table);
+  });
+
   // PDU Monitor tabs
   document.querySelectorAll('.ptab').forEach(t => t.addEventListener('click', () => {
     document.querySelectorAll('.ptab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
+    t.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     const tab = t.dataset.ptab;
     document.querySelectorAll('.ptabbody').forEach(b => b.classList.toggle('hidden', b.id !== `ptab-${tab}`));
   }));
+
+  // Ptab scroll buttons
+  const ptabsScroll = $('ptabsScroll');
+  const ptabScrollL = $('ptabScrollLeft');
+  const ptabScrollR = $('ptabScrollRight');
+  function updatePtabScrollBtns() {
+    if (!ptabsScroll) return;
+    const atLeft  = ptabsScroll.scrollLeft <= 0;
+    const atRight = ptabsScroll.scrollLeft + ptabsScroll.clientWidth >= ptabsScroll.scrollWidth - 1;
+    ptabScrollL?.classList.toggle('invisible', atLeft);
+    ptabScrollR?.classList.toggle('invisible', atRight);
+  }
+  ptabScrollL?.addEventListener('click', () => ptabsScroll?.scrollBy({ left: -140, behavior: 'smooth' }));
+  ptabScrollR?.addEventListener('click', () => ptabsScroll?.scrollBy({ left: 140, behavior: 'smooth' }));
+  ptabsScroll?.addEventListener('scroll', updatePtabScrollBtns);
+  if (ptabsScroll) new ResizeObserver(updatePtabScrollBtns).observe(ptabsScroll);
+  updatePtabScrollBtns();
 
   // Tick the "X s ago" display in the details pane every second
   setInterval(() => {

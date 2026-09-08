@@ -4,10 +4,13 @@
 
 import { pduTypeName } from './dis/enums.js';
 
-const EMITTER_TTL_MS   = 15000;
-const SIGNAL_TTL_MS    = 30000;
-const IC_CTRL_TTL_MS   = 15000;
-const IC_SIGNAL_TTL_MS = 30000;
+const EMITTER_TTL_MS    = 15000;
+const SIGNAL_TTL_MS     = 30000;
+const IC_CTRL_TTL_MS    = 15000;
+const IC_SIGNAL_TTL_MS  = 30000;
+const SET_DATA_TTL_MS   = 30000;
+const DESIGNATOR_TTL_MS = 15000;
+const MUNITION_TTL_MS   =  2000;
 
 export class Stats {
   constructor({ entityTimeoutSecs = 5 } = {}) {
@@ -31,6 +34,8 @@ export class Stats {
     this.signalStates = new Map();     // entityKey|radioId -> latest signal state
     this.intercomControls = new Map(); // ic-ctrl|sourceKey|devId|lineId -> control record
     this.intercomSignals = new Map();  // ic-sig|entityKey|devId -> signal record
+    this.setDataRecords = new Map();   // setdata|entityKey|requestId -> record
+    this.designators = new Map();      // designator|designatingKey -> record
     this.startTime = Date.now();
     this.rateWindow = [];           // timestamps (ms) for PDU/s estimate
     this.byteRateWindow = [];       // {t, b} pairs for MB/s estimate
@@ -103,11 +108,14 @@ export class Stats {
         ts: now,
         firingKey: body.firingKey,
         targetKey: body.targetKey,
+        munitionKey: body.munitionKey,
         munitionType: body.munitionTypeString,
         result: body.resultName,
         geo: body.geo,
       });
       if (this.detonations.length > 200) this.detonations.pop();
+      // Remove the flying munition entity now that it has detonated
+      if (body.munitionKey) this.entities.delete(body.munitionKey);
     }
 
     if (header.pduType === 23 && body && body.emittingKey) {
@@ -120,6 +128,10 @@ export class Stats {
       });
     }
 
+    if (header.pduType === 19 && body && body.originatingEntityKey) {
+      this.setDataRecords.set(body._key, { ...body, lastSeen: now });
+    }
+
     if (header.pduType === 25 && body && body.entityIdKey) {
       const key = `${body.entityIdKey}|${body.radioId}`;
       this.transmitters.set(key, {
@@ -130,8 +142,21 @@ export class Stats {
         txStateName: body.txState === 2 ? 'Transmitting' : body.txState === 1 ? 'On (idle)' : 'Off',
         frequency: body.frequency,
         freqMHz: body.frequency ? +(body.frequency / 1e6).toFixed(3) : 0,
-        band: body.band,
+        bandInfo: body.bandInfo,
+        band: body.bandInfo?.ituName || body.band || '—',
         power: body.power ? +body.power.toFixed(1) : 0,
+        majorModulation: body.majorModulation,
+        majorModulationName: body.majorModulationName,
+        modulationDetail: body.modulationDetail,
+        spreadSpectrum: body.spreadSpectrum,
+        radioSystem: body.radioSystem,
+        radioSystemName: body.radioSystemName,
+        cryptoSystem: body.cryptoSystem,
+        cryptoSystemName: body.cryptoSystemName,
+        cryptoKeyId: body.cryptoKeyId,
+        modParamLength: body.modParamLength,
+        modulationParams: body.modulationParams,
+        antennaPatternType: body.antennaPatternType,
         geo: body.geo,
         lastSeen: now,
       });
@@ -143,22 +168,29 @@ export class Stats {
 
     if (header.pduType === 26 && body && body.entityIdKey) {
       const key = body._key || `${body.entityIdKey}|${body.radioId}`;
-      this.signalStates.set(key, { ...body, lastSeen: now });
+      const { audioData, ...signalBody } = body; // strip Buffer; audio uses binary WS channel
+      this.signalStates.set(key, { ...signalBody, lastSeen: now });
     }
 
     if (header.pduType === 31 && body && body.entityIdKey) {
-      this.intercomSignals.set(body._key, { ...body, lastSeen: now });
+      const { audioData, ...icSigBody } = body;
+      this.intercomSignals.set(body._key, { ...icSigBody, lastSeen: now });
     }
 
     if (header.pduType === 32 && body && body.sourceEntityKey) {
       this.intercomControls.set(body._key, { ...body, lastSeen: now });
+    }
+
+    if (header.pduType === 24 && body && body.designatingKey) {
+      this.designators.set(body._key, { ...body, lastSeen: now });
     }
   }
 
   ageOut() {
     const now = Date.now();
     for (const [k, e] of this.entities) {
-      if (now - e.lastSeen > this.entityTtlMs) this.entities.delete(k);
+      const ttl = e.kind === 'Munition' ? MUNITION_TTL_MS : this.entityTtlMs;
+      if (now - e.lastSeen > ttl) this.entities.delete(k);
     }
     for (const [k, e] of this.emitters) {
       if (now - e.lastSeen > EMITTER_TTL_MS) this.emitters.delete(k);
@@ -177,6 +209,12 @@ export class Stats {
     }
     for (const [k, ic] of this.intercomSignals) {
       if (now - ic.lastSeen > IC_SIGNAL_TTL_MS) this.intercomSignals.delete(k);
+    }
+    for (const [k, sd] of this.setDataRecords) {
+      if (now - sd.lastSeen > SET_DATA_TTL_MS) this.setDataRecords.delete(k);
+    }
+    for (const [k, d] of this.designators) {
+      if (now - d.lastSeen > DESIGNATOR_TTL_MS) this.designators.delete(k);
     }
   }
 
@@ -273,6 +311,8 @@ export class Stats {
       signals: Array.from(this.signalStates.values()),
       intercomControls: Array.from(this.intercomControls.values()),
       intercomSignals: Array.from(this.intercomSignals.values()),
+      setData: Array.from(this.setDataRecords.values()),
+      designators: Array.from(this.designators.values()),
     };
   }
 }
