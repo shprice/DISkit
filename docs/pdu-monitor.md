@@ -2,7 +2,8 @@
 
 The PDU Monitor panel occupies the right side of the [View tab](view-mode.md). It presents decoded DIS PDU data across 11 tabs, one per PDU family or type.
 
-> 📸 *Screenshot: PDU Monitor showing the Entities tab with several active entities and one selected (highlighted row).*
+<img width="777" height="465" alt="Screenshot 2026-09-08 160804" src="https://github.com/user-attachments/assets/77e207aa-2989-4b62-a1d7-e01e777862b9" />
+
 
 ---
 
