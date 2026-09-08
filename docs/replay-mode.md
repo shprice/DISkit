@@ -2,7 +2,8 @@
 
 The **Replay** tab loads `.dislog` files and re-transmits the recorded PDU stream onto the network. All display features in the View tab work during replay, making it easy to analyse captured exercises offline.
 
-> 📸 *Screenshot: Replay tab with a log file loaded, timeline visible, and playback active.*
+<img width="227" height="607" alt="Screenshot 2026-09-08 160951" src="https://github.com/user-attachments/assets/bb913fb1-cecd-4f0a-ac09-3808375d7e3f" />
+
 
 ---
 
