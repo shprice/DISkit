@@ -2,7 +2,8 @@
 
 The **Log** tab controls DIS traffic capture. DISkit listens on a UDP socket and can record the raw PDU stream to a `.dislog` file for later replay and analysis.
 
-> 📸 *Screenshot: Log tab showing the Capture section with recording active (red ● indicator) and the Recordings list below.*
+<img width="249" height="287" alt="Screenshot 2026-09-08 155919" src="https://github.com/user-attachments/assets/212fa37f-3f83-4fd0-9f38-f9abcde6ff3b" />
+
 
 ---
 
@@ -23,7 +24,6 @@ The **Log** tab controls DIS traffic capture. DISkit listens on a UDP socket and
 2. Click **Start Listening** — DISkit opens the UDP socket and begins receiving PDUs. The statistics bar in the View tab starts updating.
 3. Click **Stop Listening** to close the socket.
 
-> Capture can run without recording — useful for live monitoring without saving data.
 
 ---
 
@@ -61,7 +61,7 @@ Bookmarks mark specific moments within a recording for easy navigation during re
 
 1. Ensure recording is active.
 2. Type a label in the **Bookmark** field.
-3. Click **🔖 Mark** to insert a bookmark at the current capture time.
+3. Click **+ Mark** to insert a bookmark at the current capture time.
 
 Bookmarks are stored in the `.dislog` metadata and appear as visual tick marks on the replay timeline. Clicking a bookmark during replay seeks directly to that timestamp.
 
@@ -110,7 +110,6 @@ flowchart LR
     A[DIS Network\nUDP PDUs] -->|UDP socket| B[DISkit Capture]
     B --> C{Recording?}
     C -->|Yes| D[.dislog file\nstream.bin + meta.json]
-    C -->|No| E[Live display only]
     D --> F[Replay tab]
     D --> G[Export PCAP\n.pcap for Wireshark]
     B --> H[Live View tab\nMap + PDU Monitor]
