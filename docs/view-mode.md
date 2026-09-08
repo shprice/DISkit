@@ -11,22 +11,6 @@ The **View** tab is DISkit's live monitoring mode. It displays two panels side b
 
 ## Layout
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  [View] [Log] [Replay]                    PDUs: 4,821  Rate: 32/s│
-├───────────────────────────┬─────────────────────────────────────┤
-│                           │  [Entities][Emissions][Fires][Dets]  │
-│                           │  [Transmitters][Receivers][Signals]  │
-│       MAP PANEL           │  [I/C Control][I/C Signal][Set Data] │
-│                           │  [Designators]                       │
-│                           ├─────────────────────────────────────┤
-│                           │  Entity table / selected tab         │
-│                           │                                      │
-├───────────────────────────┴─────────────────────────────────────┤
-│  Details pane (selected entity / event details)                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
 The divider between the map and monitor panels is draggable. Both panels can be collapsed using the **▾** toggle button at the top of each panel. All column widths in every table are individually draggable and persist across sessions.
 
 ---
