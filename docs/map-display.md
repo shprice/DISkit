@@ -2,7 +2,7 @@
 
 The map panel provides a real-time geospatial view of all active entities received over DIS. It supports two rendering modes and a range of display options, all persisted to localStorage between sessions.
 
-> 📸 *Screenshot: Map in online tile mode showing several entities with MIL-STD-2525D symbols, a designator line, and detonation ring.*
+<img width="982" height="589" alt="Screenshot 2026-09-08 160629" src="https://github.com/user-attachments/assets/f15db30a-0323-4366-bf12-f7ce1dd434e9" />
 
 ---
 
