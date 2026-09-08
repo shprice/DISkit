@@ -17,6 +17,20 @@ A lightweight, zero-dependency toolkit and single executable for **IEEE 1278 DIS
 
 ---
 
+## Documentation
+
+| Guide | Description |
+|---|---|
+| [Installation](docs/installation.md) | Standalone executable, running from source, build instructions |
+| [Configuration](docs/configuration.md) | config.json reference and runtime settings |
+| [View Mode](docs/view-mode.md) | Live monitoring — layout, statistics bar, entity selection |
+| [Map Display](docs/map-display.md) | Map modes, entity symbols, DR, designators, force filter, all map settings |
+| [PDU Monitor](docs/pdu-monitor.md) | All 11 monitor tabs decoded in detail |
+| [Log Mode](docs/log-mode.md) | Capture, recording, filtering, bookmarks, PCAP export |
+| [Replay Mode](docs/replay-mode.md) | Playback controls, speed, version translation, looping |
+
+---
+
 ## Quick Start & Installation
 
 ### Option 1: Standalone Single Executable (Recommended)
