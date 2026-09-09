@@ -176,6 +176,8 @@ DISkit incorporates and relies upon the following third-party libraries and data
 ---
 
 ## License
-
 MIT
 
+---
+## Looking for an awesome DIS Radio application?
+Then go take a look at one of my other projects here: https://github.com/shprice/RaDIS
