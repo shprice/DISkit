@@ -176,7 +176,7 @@ DISkit incorporates and relies upon the following third-party libraries and data
 ---
 
 ## License
-MIT
+MIT [https://github.com/shprice/DISkit/blob/main/LICENSE]
 
 ---
 ## Looking for an awesome DIS Radio application?
